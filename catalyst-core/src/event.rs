@@ -1,0 +1,132 @@
+use serde_json::Value;
+
+#[derive(Debug, Clone)]
+pub enum AgentEvent {
+    TextDelta {
+        text: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        args: Value,
+    },
+    ToolResult {
+        id: String,
+        result: String,
+        is_error: bool,
+    },
+    TokenUsage {
+        input: u64,
+        output: u64,
+    },
+    Complete,
+    Error(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_text_delta_event() {
+        let event = AgentEvent::TextDelta {
+            text: "Hello".to_string(),
+        };
+
+        match event {
+            AgentEvent::TextDelta { text } => assert_eq!(text, "Hello"),
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_thinking_delta_event() {
+        let event = AgentEvent::ThinkingDelta {
+            thinking: "Processing...".to_string(),
+        };
+
+        match event {
+            AgentEvent::ThinkingDelta { thinking } => assert_eq!(thinking, "Processing..."),
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_tool_call_event() {
+        let event = AgentEvent::ToolCall {
+            id: "tool_123".to_string(),
+            name: "read".to_string(),
+            args: serde_json::json!({"path": "/test.txt"}),
+        };
+
+        match event {
+            AgentEvent::ToolCall { id, name, args } => {
+                assert_eq!(id, "tool_123");
+                assert_eq!(name, "read");
+                assert_eq!(args["path"], "/test.txt");
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_tool_result_event() {
+        let event = AgentEvent::ToolResult {
+            id: "tool_123".to_string(),
+            result: "File contents".to_string(),
+            is_error: false,
+        };
+
+        match event {
+            AgentEvent::ToolResult {
+                id,
+                result,
+                is_error,
+            } => {
+                assert_eq!(id, "tool_123");
+                assert_eq!(result, "File contents");
+                assert!(!is_error);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_token_usage_event() {
+        let event = AgentEvent::TokenUsage {
+            input: 100,
+            output: 50,
+        };
+
+        match event {
+            AgentEvent::TokenUsage { input, output } => {
+                assert_eq!(input, 100);
+                assert_eq!(output, 50);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_complete_event() {
+        let event = AgentEvent::Complete;
+
+        match event {
+            AgentEvent::Complete => (),
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_error_event() {
+        let event = AgentEvent::Error("Something went wrong".to_string());
+
+        match event {
+            AgentEvent::Error(msg) => assert_eq!(msg, "Something went wrong"),
+            _ => panic!("Wrong event type"),
+        }
+    }
+}

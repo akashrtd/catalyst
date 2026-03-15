@@ -1,0 +1,14 @@
+[package]
+name = "catalyst-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+catalyst-core.workspace = true
+
+tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "catalyst-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+catalyst-llm.workspace = true
+catalyst-tools.workspace = true
+
+tokio.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true

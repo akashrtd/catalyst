@@ -1,0 +1,23 @@
+[package]
+name = "catalyst-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "catalyst"
+path = "src/main.rs"
+
+[dependencies]
+catalyst-core.workspace = true
+catalyst-llm.workspace = true
+catalyst-tools.workspace = true
+catalyst-tui.workspace = true
+
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+toml.workspace = true
+dirs.workspace = true
+clap = { version = "4.5", features = ["derive", "env"] }

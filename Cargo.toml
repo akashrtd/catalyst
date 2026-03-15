@@ -1,0 +1,52 @@
+[workspace]
+members = [
+    "catalyst-cli",
+    "catalyst-core",
+    "catalyst-llm",
+    "catalyst-tools",
+    "catalyst-tui",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/catalyst/catalyst"
+authors = ["Catalyst Team"]
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+tokio-stream = "0.1"
+async-trait = "0.1"
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# HTTP & Serialization
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+dirs = "6.0"
+uuid = { version = "1.11", features = ["v4"] }
+regex = "1.11"
+
+# Internal crates
+catalyst-core = { path = "catalyst-core" }
+catalyst-llm = { path = "catalyst-llm" }
+catalyst-tools = { path = "catalyst-tools" }
+catalyst-tui = { path = "catalyst-tui" }
