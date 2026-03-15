@@ -1915,10 +1915,316 @@ cargo install --path catalyst-cli
 
 ---
 
+---
+
 ## Next Steps After MVP
 
-1. Session persistence
-2. File references (@file)
-3. Multi-provider support
-4. TLA+ integration
-5. Simulation engine
+### ✅ Completed in v0.1.0-alpha
+1. ~~Multi-provider support~~ (Added OpenRouter)
+2. Basic TUI implementation
+3. 4 core tools (read, write, edit, bash)
+4. Slash commands
+5. Configuration system
+
+### 🎯 Next Release: v0.2.0-beta
+
+---
+
+## v0.2.0-beta Release Requirements
+
+### Priority: Critical (Must Fix)
+
+#### Bugs & Issues
+1. **Error Handling Improvements**
+   - [ ] Replace all `unwrap()` in production code with proper error handling
+   - [ ] Add user-friendly error messages for common failures
+   - [ ] Improve error recovery in agent stream processing
+   - Files: `catalyst-cli/src/main.rs`, `catalyst-core/src/agent.rs`
+
+2. **Edge Cases**
+   - [ ] Handle empty messages gracefully
+   - [ ] Handle network timeouts and retries
+   - [ ] Handle malformed API responses
+   - [ ] Handle rate limiting with exponential backoff
+   - Files: `catalyst-llm/src/anthropic.rs`, `catalyst-llm/src/openrouter.rs`
+
+3. **Configuration**
+   - [ ] Add config file validation
+   - [ ] Handle missing/corrupted config files
+   - [ ] Add config migration for version updates
+   - Files: `catalyst-cli/src/config.rs`
+
+#### Security
+1. **API Key Security**
+   - [ ] Mask API keys in logs and error messages
+   - [ ] Secure storage of API keys (keyring integration)
+   - [ ] Environment variable sanitization
+   - Files: `catalyst-cli/src/main.rs`, `catalyst-tui/src/app.rs`
+
+2. **Command Execution**
+   - [ ] Expand dangerous command patterns list
+   - [ ] Add command timeout enforcement
+   - [ ] Add command whitelist/blacklist configuration
+   - Files: `catalyst-tools/src/tools.rs`
+
+### Priority: High (Should Have)
+
+#### Features
+1. **Session Persistence**
+   - [ ] Save conversation history to disk
+   - [ ] Load previous sessions
+   - [ ] Session management (list, delete, resume)
+   - [ ] Auto-save on exit
+   - New files: `catalyst-core/src/session.rs`, `catalyst-cli/src/session.rs`
+
+2. **File References**
+   - [ ] Support `@file` syntax in messages
+   - [ ] Auto-read referenced files
+   - [ ] Handle large files with streaming
+   - Files: `catalyst-core/src/agent.rs`, `catalyst-tui/src/app.rs`
+
+3. **Enhanced Tool System**
+   - [ ] Add `glob` tool for file pattern matching
+   - [ ] Add `grep` tool for content search
+   - [ ] Add `list` tool for directory listing
+   - [ ] Tool timeout configuration per tool
+   - Files: `catalyst-tools/src/tools.rs`, `catalyst-tools/src/registry.rs`
+
+4. **Streaming Improvements**
+   - [ ] Show typing indicators
+   - [ ] Cancel streaming responses
+   - [ ] Resume interrupted streams
+   - Files: `catalyst-core/src/agent.rs`, `catalyst-tui/src/lib.rs`
+
+#### Testing
+1. **Unit Tests**
+   - [ ] Add tests for LLM client error handling
+   - [ ] Add tests for tool execution edge cases
+   - [ ] Add tests for configuration loading/saving
+   - [ ] Add tests for session persistence
+   - Target: 80% code coverage
+
+2. **Integration Tests**
+   - [ ] End-to-end conversation flow tests
+   - [ ] Tool execution integration tests
+   - [ ] TUI interaction tests
+   - New directory: `tests/`
+
+3. **Performance Tests**
+   - [ ] Large file handling tests
+   - [ ] Long conversation tests
+   - [ ] Memory leak detection
+
+### Priority: Medium (Nice to Have)
+
+#### User Experience
+1. **TUI Enhancements**
+   - [ ] Add message search functionality
+   - [ ] Add message copy/paste
+   - [ ] Add conversation export (markdown, JSON)
+   - [ ] Add syntax highlighting for code blocks
+   - [ ] Add message timestamps
+   - Files: `catalyst-tui/src/ui.rs`, `catalyst-tui/src/app.rs`
+
+2. **Keyboard Shortcuts**
+   - [ ] Add vim-style navigation
+   - [ ] Add page up/down for message history
+   - [ ] Add keyboard shortcuts for common actions
+   - Files: `catalyst-tui/src/lib.rs`
+
+3. **Themes**
+   - [ ] Add multiple color themes
+   - [ ] Add custom theme support
+   - [ ] Add light/dark mode toggle
+   - Files: `catalyst-tui/src/theme.rs`
+
+#### Performance
+1. **Optimizations**
+   - [ ] Implement message pagination for long conversations
+   - [ ] Add caching for frequently accessed files
+   - [ ] Optimize TUI rendering for large outputs
+   - Files: `catalyst-tui/src/app.rs`, `catalyst-tui/src/ui.rs`
+
+2. **Memory Management**
+   - [ ] Limit conversation history size
+   - [ ] Implement message pruning strategies
+   - [ ] Add memory usage monitoring
+
+#### Documentation
+1. **User Documentation**
+   - [ ] Add troubleshooting guide
+   - [ ] Add FAQ section
+   - [ ] Add video tutorials
+   - [ ] Add example configurations
+   - Files: `USAGE.md`, `docs/`
+
+2. **Developer Documentation**
+   - [ ] Add architecture diagrams
+   - [ ] Add API documentation
+   - [ ] Add contribution workflow diagrams
+   - Files: `CONTRIBUTING.md`, `docs/architecture.md`
+
+### Priority: Low (Future Consideration)
+
+#### Advanced Features
+1. **Multi-file Operations**
+   - [ ] Batch file operations
+   - [ ] File watching and auto-reload
+   - [ ] Directory tree visualization
+
+2. **Code Analysis**
+   - [ ] AST parsing for better code understanding
+   - [ ] Symbol navigation
+   - [ ] Code completion suggestions
+
+3. **Integrations**
+   - [ ] Git integration (commit, diff, blame)
+   - [ ] IDE integration (LSP support)
+   - [ ] CI/CD integration
+
+4. **Advanced AI Features**
+   - [ ] Multi-turn context management
+   - [ ] Code explanation mode
+   - [ ] Refactoring suggestions
+   - [ ] Test generation
+
+---
+
+## Release Checklist v0.2.0-beta
+
+### Pre-Release
+- [ ] All critical bugs fixed
+- [ ] All high-priority features implemented
+- [ ] All tests passing
+- [ ] Zero clippy warnings
+- [ ] Code coverage > 70%
+- [ ] Documentation updated
+- [ ] CHANGELOG.md created
+- [ ] Migration guide from v0.1.0 created
+
+### Testing
+- [ ] Manual testing on macOS
+- [ ] Manual testing on Linux
+- [ ] Manual testing on Windows
+- [ ] Performance benchmarks
+- [ ] Memory leak testing
+- [ ] Edge case testing
+
+### Documentation
+- [ ] README.md updated
+- [ ] USAGE.md updated
+- [ ] CONTRIBUTING.md updated
+- [ ] API documentation complete
+- [ ] Examples added
+
+### Release
+- [ ] Version bumped in Cargo.toml
+- [ ] Git tag created (v0.2.0-beta)
+- [ ] GitHub release published
+- [ ] Release notes written
+- [ ] Binaries built for all platforms
+- [ ] Homebrew formula updated (optional)
+- [ ] Announcement posted
+
+---
+
+## Known Issues (v0.1.0-alpha)
+
+### Critical
+- None identified
+
+### High
+1. **API Error Handling**: Some API errors may cause panics instead of graceful degradation
+2. **Large Files**: No streaming for very large file reads (>100MB)
+3. **Network Issues**: No retry logic for transient network failures
+
+### Medium
+1. **Message History**: No pagination for very long conversations
+2. **Syntax Highlighting**: Code blocks don't have syntax highlighting
+3. **Session Persistence**: Conversations lost on exit
+4. **File References**: No `@file` syntax support
+
+### Low
+1. **Themes**: Only one color theme available
+2. **Export**: No conversation export functionality
+3. **Search**: No message search functionality
+
+---
+
+## Technical Debt
+
+### Code Quality
+1. **Error Types**: Create custom error types instead of using `anyhow::Error` everywhere
+2. **Logging**: Add structured logging with levels
+3. **Metrics**: Add performance metrics collection
+4. **Tracing**: Add distributed tracing support
+
+### Architecture
+1. **Modularity**: Better separation of concerns in agent module
+2. **Testing**: More comprehensive test coverage
+3. **Documentation**: More inline code documentation
+4. **Type Safety**: Use newtypes for IDs and strong types
+
+### Dependencies
+1. **Audit**: Run `cargo audit` regularly
+2. **Updates**: Keep dependencies up to date
+3. **Minimization**: Remove unused dependencies
+
+---
+
+## Success Metrics for v0.2.0-beta
+
+### Quality
+- [ ] Zero critical bugs
+- [ ] < 5 high-priority bugs
+- [ ] Test coverage > 70%
+- [ ] All clippy warnings resolved
+- [ ] Zero security vulnerabilities
+
+### Performance
+- [ ] Startup time < 100ms
+- [ ] Message send latency < 50ms
+- [ ] Memory usage < 100MB idle
+- [ ] Smooth 60fps UI rendering
+
+### User Experience
+- [ ] Error messages are helpful
+- [ ] No unexpected crashes
+- [ ] Intuitive keyboard navigation
+- [ ] Clear documentation
+
+---
+
+## Timeline Estimate
+
+| Phase | Duration | Tasks |
+|-------|----------|-------|
+| Bug Fixes | 1-2 weeks | Critical and high priority bugs |
+| Session Persistence | 1 week | Save/load conversations |
+| File References | 3-5 days | @file syntax support |
+| Enhanced Tools | 1 week | glob, grep, list tools |
+| Testing | 1 week | Comprehensive test suite |
+| Documentation | 3-5 days | Update all docs |
+| Polish | 3-5 days | UI improvements, performance |
+| **Total** | **5-7 weeks** | **v0.2.0-beta release** |
+
+---
+
+## Future Roadmap
+
+### v0.3.0
+- TLA+ verification integration
+- Simulation engine
+- Advanced code analysis
+
+### v0.4.0
+- IDE integration (LSP)
+- Git integration
+- Multi-file operations
+
+### v1.0.0
+- Production-ready release
+- Complete feature set
+- Extensive testing
+- Full documentation
+- Multiple platform support
