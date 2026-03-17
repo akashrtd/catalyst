@@ -143,3 +143,175 @@ impl ModelInfo {
             + (output_tokens as f64 * self.cost_output / 1_000_000.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_help_command() {
+        assert!(matches!(Command::parse("/help"), Some(Command::Help)));
+        assert!(matches!(Command::parse("/h"), Some(Command::Help)));
+        assert!(matches!(Command::parse("/?"), Some(Command::Help)));
+    }
+
+    #[test]
+    fn test_parse_clear_command() {
+        assert!(matches!(Command::parse("/clear"), Some(Command::Clear)));
+        assert!(matches!(Command::parse("/c"), Some(Command::Clear)));
+    }
+
+    #[test]
+    fn test_parse_exit_command() {
+        assert!(matches!(Command::parse("/exit"), Some(Command::Exit)));
+        assert!(matches!(Command::parse("/quit"), Some(Command::Exit)));
+        assert!(matches!(Command::parse("/q"), Some(Command::Exit)));
+    }
+
+    #[test]
+    fn test_parse_config_command() {
+        assert!(matches!(Command::parse("/config"), Some(Command::Config)));
+        assert!(matches!(Command::parse("/cfg"), Some(Command::Config)));
+    }
+
+    #[test]
+    fn test_parse_model_command() {
+        match Command::parse("/model claude-3-opus") {
+            Some(Command::Model { name }) => assert_eq!(name, "claude-3-opus"),
+            _ => panic!("Expected Model command"),
+        }
+
+        match Command::parse("/m claude-3-haiku") {
+            Some(Command::Model { name }) => assert_eq!(name, "claude-3-haiku"),
+            _ => panic!("Expected Model command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_model_command_empty() {
+        match Command::parse("/model") {
+            Some(Command::Model { name }) => assert!(name.is_empty()),
+            _ => panic!("Expected Model command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_unknown_command() {
+        match Command::parse("/unknown") {
+            Some(Command::Unknown(s)) => assert_eq!(s, "unknown"),
+            _ => panic!("Expected Unknown command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_non_command() {
+        assert!(Command::parse("hello").is_none());
+        assert!(Command::parse("not a command").is_none());
+    }
+
+    #[test]
+    fn test_parse_with_whitespace() {
+        assert!(matches!(Command::parse("  /help  "), Some(Command::Help)));
+        assert!(matches!(Command::parse("/clear   "), Some(Command::Clear)));
+    }
+
+    #[test]
+    fn test_model_info_find_exact() {
+        let model = ModelInfo::find("claude-sonnet-4-20250514");
+        assert!(model.is_some());
+        let model = model.unwrap();
+        assert_eq!(model.display_name, "Claude Sonnet 4");
+        assert_eq!(model.provider, "anthropic");
+    }
+
+    #[test]
+    fn test_model_info_find_by_display_name() {
+        let model = ModelInfo::find("Claude Sonnet 4");
+        assert!(model.is_some());
+    }
+
+    #[test]
+    fn test_model_info_find_by_partial_name() {
+        let model = ModelInfo::find("sonnet-4");
+        assert!(model.is_some());
+    }
+
+    #[test]
+    fn test_model_info_find_case_insensitive() {
+        let model = ModelInfo::find("CLAUDE SONNET 4");
+        assert!(model.is_some());
+    }
+
+    #[test]
+    fn test_model_info_find_not_found() {
+        let model = ModelInfo::find("nonexistent-model");
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn test_model_info_calculate_cost() {
+        let model = ModelInfo::find("claude-sonnet-4-20250514").unwrap();
+
+        let cost = model.calculate_cost(1_000_000, 1_000_000);
+        assert!((cost - 18.0).abs() < 0.01);
+
+        let cost = model.calculate_cost(500_000, 500_000);
+        assert!((cost - 9.0).abs() < 0.01);
+
+        let cost = model.calculate_cost(0, 0);
+        assert!((cost - 0.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_model_info_all() {
+        let models = ModelInfo::all();
+        assert!(!models.is_empty());
+        assert!(models.iter().any(|m| m.name.contains("sonnet")));
+        assert!(models.iter().any(|m| m.name.contains("opus")));
+        assert!(models.iter().any(|m| m.name.contains("haiku")));
+    }
+
+    #[test]
+    fn test_provider_info_all() {
+        let providers = ProviderInfo::all();
+        assert!(!providers.is_empty());
+        assert!(providers.iter().any(|p| p.id == "anthropic"));
+        assert!(providers.iter().any(|p| p.id == "openrouter"));
+    }
+
+    #[test]
+    fn test_provider_info_find() {
+        let provider = ProviderInfo::find("anthropic");
+        assert!(provider.is_some());
+        let provider = provider.unwrap();
+        assert_eq!(provider.name, "Anthropic");
+        assert_eq!(provider.env_var, "ANTHROPIC_API_KEY");
+        assert!(!provider.models.is_empty());
+    }
+
+    #[test]
+    fn test_provider_info_find_openrouter() {
+        let provider = ProviderInfo::find("openrouter");
+        assert!(provider.is_some());
+        let provider = provider.unwrap();
+        assert_eq!(provider.name, "OpenRouter");
+        assert_eq!(provider.env_var, "OPENROUTER_API_KEY");
+        assert!(!provider.models.is_empty());
+    }
+
+    #[test]
+    fn test_provider_info_find_not_found() {
+        let provider = ProviderInfo::find("nonexistent");
+        assert!(provider.is_none());
+    }
+
+    #[test]
+    fn test_help_text() {
+        let help = Command::help_text();
+        assert!(!help.is_empty());
+        assert!(help.iter().any(|line| line.contains("help")));
+        assert!(help.iter().any(|line| line.contains("model")));
+        assert!(help.iter().any(|line| line.contains("clear")));
+        assert!(help.iter().any(|line| line.contains("exit")));
+    }
+}

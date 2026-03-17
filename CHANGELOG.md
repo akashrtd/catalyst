@@ -19,6 +19,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Various bug fixes and improvements (planned for v0.2.0)
 
+## [0.1.1] - 2026-03-18
+
+### Added
+
+#### Testing
+- **94 total tests** (up from 25) with comprehensive coverage
+- CLI tests with clap `debug_assert()` validation
+- Config module tests for serialization and CLI arg merging
+- Command parsing tests for all slash commands
+- TUI App state tests for event handling and state management
+- Mock LLM provider for agent testing without real API calls
+- ModelInfo and ProviderInfo tests
+- Key handling tests for all input modes
+
+#### Dependencies
+- Added `async-trait` to catalyst-core for mock provider testing
+- Added `serde_json` to catalyst-tui for test support
+
+### Changed
+
+#### CLI
+- Added `--version` flag support
+- Improved CLI validation with clap debug assertions
+
+#### Code Quality
+- Fixed all clippy warnings
+- Added `#[allow(dead_code)]` for test-only helper functions
+
+### Technical Details
+
+#### Test Coverage by Crate
+- `catalyst-cli`: 15 tests (CLI parsing, config)
+- `catalyst-core`: 15 tests (agent, events, mock provider)
+- `catalyst-llm`: 10 tests (type serialization, provider parsing)
+- `catalyst-tools`: 10 tests (all 4 tools + registry)
+- `catalyst-tui`: 44 tests (app state, commands, key handling)
+
 ## [0.1.0-alpha] - 2026-03-16
 
 ### Added

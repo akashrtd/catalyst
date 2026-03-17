@@ -152,6 +152,7 @@ name = "catalyst-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "catalyst-llm",
  "catalyst-tools",
  "futures",
@@ -203,6 +204,7 @@ dependencies = [
  "catalyst-core",
  "crossterm",
  "ratatui",
+ "serde_json",
  "thiserror",
  "tokio",
  "tracing",

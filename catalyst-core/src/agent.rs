@@ -225,3 +225,309 @@ Available tools:
 
 Always think through problems carefully before acting.
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use catalyst_llm::{ContentBlock, LlmProvider, LlmStream, Usage};
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::mpsc;
+
+    struct MockStream {
+        events: Arc<Mutex<Vec<StreamEvent>>>,
+    }
+
+    impl MockStream {
+        fn new(events: Vec<StreamEvent>) -> Self {
+            Self {
+                events: Arc::new(Mutex::new(events)),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmStream for MockStream {
+        async fn next_event(&mut self) -> Result<Option<StreamEvent>> {
+            let mut events = self.events.lock().unwrap();
+            if events.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(events.remove(0)))
+            }
+        }
+    }
+
+    struct MockProvider {
+        events: Arc<Mutex<Vec<StreamEvent>>>,
+        model: String,
+    }
+
+    impl MockProvider {
+        fn new(model: String, events: Vec<StreamEvent>) -> Self {
+            Self {
+                events: Arc::new(Mutex::new(events)),
+                model,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockProvider {
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        fn model(&self) -> &str {
+            &self.model
+        }
+
+        async fn stream(
+            &self,
+            _system: Option<&str>,
+            _messages: Vec<Message>,
+            _tools: Vec<serde_json::Value>,
+        ) -> Result<Box<dyn LlmStream + Send + Unpin>> {
+            let events = self.events.lock().unwrap().clone();
+            Ok(Box::new(MockStream::new(events)))
+        }
+    }
+
+    fn create_test_agent(events: Vec<StreamEvent>) -> Agent {
+        let provider = MockProvider::new("test-model".to_string(), events);
+        let tools = ToolRegistry::new();
+        let working_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        Agent::new(Box::new(provider), tools, working_dir)
+    }
+
+    #[tokio::test]
+    async fn test_agent_new() {
+        let events = vec![StreamEvent::MessageStop];
+        let agent = create_test_agent(events);
+        
+        assert_eq!(agent.messages.len(), 0);
+        assert!(!agent.system_prompt.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_agent_set_system_prompt() {
+        let events = vec![StreamEvent::MessageStop];
+        let mut agent = create_test_agent(events);
+        
+        agent.set_system_prompt("Custom prompt".to_string());
+        assert_eq!(agent.system_prompt, "Custom prompt");
+    }
+
+    #[tokio::test]
+    async fn test_agent_send_text_response() {
+        let events = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Text {
+                    text: "Hello, world!".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageStop,
+        ];
+        
+        let mut agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        
+        agent.send("Hi".to_string(), tx).await.unwrap();
+        
+        let mut received_text = false;
+        let mut received_complete = false;
+        
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentEvent::TextDelta { text } => {
+                    assert_eq!(text, "Hello, world!");
+                    received_text = true;
+                }
+                AgentEvent::Complete => received_complete = true,
+                _ => {}
+            }
+        }
+        
+        assert!(received_text);
+        assert!(received_complete);
+        assert_eq!(agent.messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_agent_send_with_thinking() {
+        let events = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Thinking {
+                    thinking: "Let me think...".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::ContentBlockStart {
+                index: 1,
+                content_block: ContentBlock::Text {
+                    text: "Response".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 1 },
+            StreamEvent::MessageStop,
+        ];
+        
+        let mut agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        
+        agent.send("Hi".to_string(), tx).await.unwrap();
+        
+        let mut received_thinking = false;
+        let mut received_text = false;
+        
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentEvent::ThinkingDelta { thinking } => {
+                    assert_eq!(thinking, "Let me think...");
+                    received_thinking = true;
+                }
+                AgentEvent::TextDelta { text } => {
+                    assert_eq!(text, "Response");
+                    received_text = true;
+                }
+                _ => {}
+            }
+        }
+        
+        assert!(received_thinking);
+        assert!(received_text);
+    }
+
+    #[tokio::test]
+    async fn test_agent_token_usage() {
+        let events = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Text {
+                    text: "Response".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageDelta {
+                delta: catalyst_llm::MessageDeltaInfo {
+                    stop_reason: Some("end_turn".to_string()),
+                },
+                usage: Usage {
+                    input_tokens: 100,
+                    output_tokens: 50,
+                    cache_creation_input_tokens: 0,
+                    cache_read_input_tokens: 0,
+                },
+            },
+            StreamEvent::MessageStop,
+        ];
+        
+        let mut agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        
+        agent.send("Hi".to_string(), tx).await.unwrap();
+        
+        let mut received_usage = false;
+        
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentEvent::TokenUsage { input, output } => {
+                    assert_eq!(input, 100);
+                    assert_eq!(output, 50);
+                    received_usage = true;
+                }
+                _ => {}
+            }
+        }
+        
+        assert!(received_usage);
+    }
+
+    #[tokio::test]
+    async fn test_agent_error_handling() {
+        let events = vec![StreamEvent::Error {
+            error: catalyst_llm::ApiError {
+                error_type: "rate_limit".to_string(),
+                message: "Rate limit exceeded".to_string(),
+            },
+        }];
+        
+        let mut agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        
+        agent.send("Hi".to_string(), tx).await.unwrap();
+        
+        let mut received_error = false;
+        
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                AgentEvent::Error(msg) => {
+                    assert!(msg.contains("Rate limit exceeded"));
+                    received_error = true;
+                }
+                _ => {}
+            }
+        }
+        
+        assert!(received_error);
+    }
+
+    #[tokio::test]
+    async fn test_agent_user_message_added() {
+        let events = vec![StreamEvent::MessageStop];
+        let mut agent = create_test_agent(events);
+        let (tx, _) = mpsc::unbounded_channel();
+        
+        agent.send("Test message".to_string(), tx).await.unwrap();
+        
+        assert_eq!(agent.messages.len(), 1);
+        match &agent.messages[0] {
+            Message {
+                role: Role::User,
+                content: Content::Text(text),
+            } => assert_eq!(text, "Test message"),
+            _ => panic!("Expected user message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_agent_conversation_history() {
+        let events1 = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Text {
+                    text: "First response".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageStop,
+        ];
+        
+        let mut agent = create_test_agent(events1);
+        let (tx, _) = mpsc::unbounded_channel();
+        
+        agent.send("First".to_string(), tx.clone()).await.unwrap();
+        assert_eq!(agent.messages.len(), 2);
+        
+        agent.messages.clear();
+        
+        let events2 = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Text {
+                    text: "Second response".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageStop,
+        ];
+        
+        let provider2 = MockProvider::new("test-model".to_string(), events2);
+        agent.provider = Box::new(provider2);
+        
+        agent.send("Second".to_string(), tx).await.unwrap();
+        assert_eq!(agent.messages.len(), 2);
+    }
+}

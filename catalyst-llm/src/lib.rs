@@ -8,6 +8,9 @@ pub use openrouter::OpenRouterClient;
 pub use provider::{LlmProvider, LlmStream};
 pub use types::*;
 
+#[cfg(test)]
+pub use provider::mock;
+
 pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Debug, Clone, PartialEq)]

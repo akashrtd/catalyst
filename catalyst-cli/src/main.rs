@@ -5,15 +5,23 @@ use catalyst_core::Agent;
 use catalyst_llm::{create_provider, Provider};
 use catalyst_tools::ToolRegistry;
 use catalyst_tui::{run_app, App};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use config::Config;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[allow(dead_code)]
+fn cli() -> clap::Command {
+    Cli::command()
+}
+
 #[derive(Parser)]
 #[command(name = "catalyst")]
+#[command(version = VERSION)]
 #[command(about = "A research-driven AI coding agent", long_about = None)]
 struct Cli {
     /// Working directory
@@ -171,4 +179,54 @@ async fn main() -> Result<()> {
     run_app(&mut app, agent_rx, input_tx, api_key_tx).await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_cli() {
+        cli().debug_assert();
+    }
+
+    #[test]
+    fn test_cli_default_values() {
+        let cli = Cli::try_parse_from(["catalyst"]);
+        assert!(cli.is_ok());
+        let cli = cli.unwrap();
+        assert!(cli.dir.is_none());
+        assert!(cli.model.is_none());
+        assert!(cli.provider.is_none());
+        assert!(cli.api_key.is_none());
+    }
+
+    #[test]
+    fn test_cli_with_options() {
+        let cli = Cli::try_parse_from(["catalyst", "--model", "claude-3-opus", "--provider", "anthropic"]);
+        assert!(cli.is_ok());
+        let cli = cli.unwrap();
+        assert_eq!(cli.model, Some("claude-3-opus".to_string()));
+        assert_eq!(cli.provider, Some("anthropic".to_string()));
+    }
+
+    #[test]
+    fn test_cli_with_dir() {
+        let cli = Cli::try_parse_from(["catalyst", "-d", "/tmp/test"]);
+        assert!(cli.is_ok());
+        let cli = cli.unwrap();
+        assert_eq!(cli.dir, Some(PathBuf::from("/tmp/test")));
+    }
+
+    #[test]
+    fn test_cli_version_flag() {
+        let result = Cli::try_parse_from(["catalyst", "--version"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_help_flag() {
+        let result = Cli::try_parse_from(["catalyst", "--help"]);
+        assert!(result.is_err());
+    }
 }
