@@ -1,0 +1,72 @@
+// TUI Test Snapshot v1
+
+exports[`Slash Commands › /config snapshot | 1`] = String.raw`
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│╭──────────────────────────────────────────────────────────────────────────────────────────────────╮│
+││◈ CATALYST ╺─╸ claude-sonnet-4-20250514                                                           ││
+││                                                                                                  ││
+││  ◈ Provider: anthropic | Model: claude-sonnet-4-20250514                                         ││
+││  ⚠ No API key configured. Use /model to select a provider and enter your API key.                ││
+││  ◈ Welcome to Catalyst! Type /help for commands.                                                 ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+│╭ ◈ NORMAL ────────────────────────────────────────────────────────────────────────────────────────╮│
+││                                                                                                  ││
+│╰──────────────────────────────────────────────────────────────────────────────────────────────────╯│
+│insert │ Esc normal │ Enter send │ /help cmds │ Ctrl+C quit                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+`;
+
+exports[`Slash Commands › /help snapshot | 1`] = String.raw`
+╭────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│╭──────────────────────────────────────────────────────────────────────────────────────────────────╮│
+││◈ CATALYST ╺─╸ claude-sonnet-4-20250514                                                           ││
+││                                                                                                  ││
+││  ◈ Provider: anthropic | Model: claude-sonnet-4-20250514                                         ││
+││  ⚠ No API key configured. Use /model to select a provider and enter your API key.                ││
+││  ◈ Welcome to Catalyst! Type /help for commands.                                                 ││
+││  ◈ ┌─ Commands ──────────────────────────────────────┐                                           ││
+││  ◈ │ /help, /h, /?         Show this help           │                                            ││
+││  ◈ │ /model, /m <name>     Switch model             │                                            ││
+││  ◈ │ /clear, /c            Clear conversation       │                                            ││
+││  ◈ │ /config, /cfg         Show config              │                                            ││
+││  ◈ │ /sessions, /ss        List saved sessions      │                                            ││
+││  ◈ │ /session resume <id>  Resume a session         │                                            ││
+││  ◈ │ /session new          Start new session        │                                            ││
+││  ◈ │ /exit, /quit, /q      Exit Catalyst            │                                            ││
+││  ◈ └─────────────────────────────────────────────────┘                                           ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+││                                                                                                  ││
+│╭ ◈ INSERT ────────────────────────────────────────────────────────────────────────────────────────╮│
+││                                                                                                  ││
+│╰──────────────────────────────────────────────────────────────────────────────────────────────────╯│
+│insert │ Esc normal │ Enter send │ /help cmds │ Ctrl+C quit                                         │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯
+`;
+

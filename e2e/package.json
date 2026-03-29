@@ -1,0 +1,12 @@
+{
+  "name": "catalyst-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "tui-test",
+    "test:e2e:trace": "tui-test --trace"
+  },
+  "devDependencies": {
+    "@microsoft/tui-test": "^0.0.3"
+  }
+}
