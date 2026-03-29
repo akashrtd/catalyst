@@ -153,7 +153,9 @@ async fn main() -> Result<()> {
                             let provider_type = Provider::from_string(&provider_str).unwrap_or(Provider::Anthropic);
                             let provider = create_provider(provider_type, key.clone(), model.clone());
                             let tools = ToolRegistry::new();
-                            *agent_guard = Some(Agent::new(provider, tools, (*working_dir_arc).clone()));
+                            let mut agent = Agent::new(provider, tools, (*working_dir_arc).clone());
+                            agent.set_system_prompt(agent.build_dynamic_prompt());
+                            *agent_guard = Some(agent);
                         }
 
                         if let Some(ref mut agent_instance) = *agent_guard {
