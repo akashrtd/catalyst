@@ -1,10 +1,26 @@
-use crate::AgentEvent;
-use anyhow::{Context, Result};
+use crate::{AgentEvent, AgentState};
+use anyhow::Result;
 use catalyst_llm::{Content, ContentBlock, LlmProvider, Message, Role, StreamEvent};
 use catalyst_tools::{ToolContext, ToolRegistry};
 use serde_json::Value;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
+
+pub struct AgentConfig {
+    pub max_iterations: usize,
+    pub auto_retry: bool,
+    pub max_retries: usize,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 25,
+            auto_retry: true,
+            max_retries: 2,
+        }
+    }
+}
 
 pub struct Agent {
     provider: Box<dyn LlmProvider + Send + Sync>,
@@ -12,6 +28,8 @@ pub struct Agent {
     messages: Vec<Message>,
     system_prompt: String,
     working_dir: std::path::PathBuf,
+    config: AgentConfig,
+    state: AgentState,
 }
 
 impl Agent {
@@ -26,7 +44,20 @@ impl Agent {
             messages: Vec::new(),
             system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
             working_dir,
+            config: AgentConfig::default(),
+            state: AgentState::Idle,
         }
+    }
+
+    pub fn state(&self) -> &AgentState {
+        &self.state
+    }
+
+    fn transition(&mut self, new_state: AgentState, tx: &mpsc::UnboundedSender<AgentEvent>) {
+        let from = self.state.to_string();
+        let to = new_state.to_string();
+        self.state = new_state;
+        let _ = tx.send(AgentEvent::StateChanged { from, to });
     }
 
     pub fn set_system_prompt(&mut self, prompt: String) {
@@ -38,15 +69,23 @@ impl Agent {
         user_message: String,
         tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<()> {
+        self.transition(AgentState::Planning, &tx);
+
         self.messages.push(Message {
             role: Role::User,
             content: Content::Text(user_message),
         });
 
-        self.process_stream(tx).await
+        self.process_stream(tx, 0).await
     }
 
-    async fn process_stream(&mut self, tx: mpsc::UnboundedSender<AgentEvent>) -> Result<()> {
+    async fn process_stream(
+        &mut self,
+        tx: mpsc::UnboundedSender<AgentEvent>,
+        iteration: usize,
+    ) -> Result<()> {
+        self.transition(AgentState::Executing { iteration }, &tx);
+
         let anthropic_tools = self.tools.to_anthropic_tools();
 
         let mut stream = self
@@ -135,18 +174,23 @@ impl Agent {
                         let args_clone = args.clone();
                         let working_dir = self.working_dir.clone();
 
-                        let result = tokio::task::spawn_blocking(move || {
-                            let ctx = ToolContext {
-                                working_dir,
-                                env: HashMap::new(),
-                                timeout_ms: 120_000,
-                            };
-                            tools.execute(&name_clone, args_clone, &ctx)
-                        })
-                        .await
-                        .context("Tool execution panicked")??;
-
-                        let (output, is_error) = (result.output, false);
+                        let ctx = ToolContext {
+                            working_dir,
+                            env: HashMap::new(),
+                            timeout_ms: 120_000,
+                        };
+                        let result = match tools.execute(&name_clone, args_clone, &ctx).await {
+                            Ok(r) => (r.output, false),
+                            Err(e) => {
+                                let error_msg = format!("Tool error: {}", e);
+                                if self.config.auto_retry {
+                                    (error_msg, true)
+                                } else {
+                                    return Err(e);
+                                }
+                            }
+                        };
+                        let (output, is_error) = result;
 
                         let _ = tx.send(AgentEvent::ToolResult {
                             id: id.clone(),
@@ -168,7 +212,15 @@ impl Agent {
                             }]),
                         });
 
-                        return Box::pin(self.process_stream(tx)).await;
+                        if iteration >= self.config.max_iterations {
+                            let _ = tx.send(AgentEvent::Error(format!(
+                                "Max iterations ({}) reached. Stopping to prevent runaway.",
+                                self.config.max_iterations
+                            )));
+                            return Ok(());
+                        }
+
+                        return Box::pin(self.process_stream(tx, iteration + 1)).await;
                     }
                 }
 
@@ -188,10 +240,12 @@ impl Agent {
                             content: Content::Blocks(assistant_content.clone()),
                         });
                     }
+                    self.transition(AgentState::Complete, &tx);
                     let _ = tx.send(AgentEvent::Complete);
                 }
 
                 StreamEvent::Error { error } => {
+                    self.transition(AgentState::Error(error.message.clone()), &tx);
                     let _ = tx.send(AgentEvent::Error(error.message));
                 }
             }
@@ -218,10 +272,13 @@ When editing code:
 4. Verify your changes work
 
 Available tools:
-- read: Read file contents
+- read: Read file contents with line numbers
 - write: Create new files
-- edit: Edit existing files
+- edit: Edit existing files by replacing text
 - bash: Execute shell commands
+- glob: Find files matching a pattern
+- grep: Search file contents with regex
+- list: List directory contents with metadata
 
 Always think through problems carefully before acting.
 "#;
@@ -303,7 +360,7 @@ mod tests {
     async fn test_agent_new() {
         let events = vec![StreamEvent::MessageStop];
         let agent = create_test_agent(events);
-        
+
         assert_eq!(agent.messages.len(), 0);
         assert!(!agent.system_prompt.is_empty());
     }
@@ -312,7 +369,7 @@ mod tests {
     async fn test_agent_set_system_prompt() {
         let events = vec![StreamEvent::MessageStop];
         let mut agent = create_test_agent(events);
-        
+
         agent.set_system_prompt("Custom prompt".to_string());
         assert_eq!(agent.system_prompt, "Custom prompt");
     }
@@ -329,15 +386,15 @@ mod tests {
             StreamEvent::ContentBlockStop { index: 0 },
             StreamEvent::MessageStop,
         ];
-        
+
         let mut agent = create_test_agent(events);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         agent.send("Hi".to_string(), tx).await.unwrap();
-        
+
         let mut received_text = false;
         let mut received_complete = false;
-        
+
         while let Ok(event) = rx.try_recv() {
             match event {
                 AgentEvent::TextDelta { text } => {
@@ -348,7 +405,7 @@ mod tests {
                 _ => {}
             }
         }
-        
+
         assert!(received_text);
         assert!(received_complete);
         assert_eq!(agent.messages.len(), 2);
@@ -373,15 +430,15 @@ mod tests {
             StreamEvent::ContentBlockStop { index: 1 },
             StreamEvent::MessageStop,
         ];
-        
+
         let mut agent = create_test_agent(events);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         agent.send("Hi".to_string(), tx).await.unwrap();
-        
+
         let mut received_thinking = false;
         let mut received_text = false;
-        
+
         while let Ok(event) = rx.try_recv() {
             match event {
                 AgentEvent::ThinkingDelta { thinking } => {
@@ -395,7 +452,7 @@ mod tests {
                 _ => {}
             }
         }
-        
+
         assert!(received_thinking);
         assert!(received_text);
     }
@@ -423,25 +480,22 @@ mod tests {
             },
             StreamEvent::MessageStop,
         ];
-        
+
         let mut agent = create_test_agent(events);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         agent.send("Hi".to_string(), tx).await.unwrap();
-        
+
         let mut received_usage = false;
-        
+
         while let Ok(event) = rx.try_recv() {
-            match event {
-                AgentEvent::TokenUsage { input, output } => {
-                    assert_eq!(input, 100);
-                    assert_eq!(output, 50);
-                    received_usage = true;
-                }
-                _ => {}
+            if let AgentEvent::TokenUsage { input, output } = event {
+                assert_eq!(input, 100);
+                assert_eq!(output, 50);
+                received_usage = true;
             }
         }
-        
+
         assert!(received_usage);
     }
 
@@ -453,24 +507,21 @@ mod tests {
                 message: "Rate limit exceeded".to_string(),
             },
         }];
-        
+
         let mut agent = create_test_agent(events);
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         agent.send("Hi".to_string(), tx).await.unwrap();
-        
+
         let mut received_error = false;
-        
+
         while let Ok(event) = rx.try_recv() {
-            match event {
-                AgentEvent::Error(msg) => {
-                    assert!(msg.contains("Rate limit exceeded"));
-                    received_error = true;
-                }
-                _ => {}
+            if let AgentEvent::Error(msg) = event {
+                assert!(msg.contains("Rate limit exceeded"));
+                received_error = true;
             }
         }
-        
+
         assert!(received_error);
     }
 
@@ -479,9 +530,9 @@ mod tests {
         let events = vec![StreamEvent::MessageStop];
         let mut agent = create_test_agent(events);
         let (tx, _) = mpsc::unbounded_channel();
-        
+
         agent.send("Test message".to_string(), tx).await.unwrap();
-        
+
         assert_eq!(agent.messages.len(), 1);
         match &agent.messages[0] {
             Message {
@@ -504,15 +555,15 @@ mod tests {
             StreamEvent::ContentBlockStop { index: 0 },
             StreamEvent::MessageStop,
         ];
-        
+
         let mut agent = create_test_agent(events1);
         let (tx, _) = mpsc::unbounded_channel();
-        
+
         agent.send("First".to_string(), tx.clone()).await.unwrap();
         assert_eq!(agent.messages.len(), 2);
-        
+
         agent.messages.clear();
-        
+
         let events2 = vec![
             StreamEvent::ContentBlockStart {
                 index: 0,
@@ -523,10 +574,10 @@ mod tests {
             StreamEvent::ContentBlockStop { index: 0 },
             StreamEvent::MessageStop,
         ];
-        
+
         let provider2 = MockProvider::new("test-model".to_string(), events2);
         agent.provider = Box::new(provider2);
-        
+
         agent.send("Second".to_string(), tx).await.unwrap();
         assert_eq!(agent.messages.len(), 2);
     }

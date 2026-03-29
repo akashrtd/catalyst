@@ -1,4 +1,4 @@
-use crate::tools::{BashTool, EditTool, ReadTool, WriteTool};
+use crate::tools::{BashTool, EditTool, GlobTool, GrepTool, ListTool, ReadTool, WriteTool};
 use crate::{Tool, ToolContext, ToolResult};
 use anyhow::{Context, Result};
 use serde_json::json;
@@ -18,6 +18,9 @@ impl ToolRegistry {
         registry.register(Box::new(WriteTool));
         registry.register(Box::new(EditTool));
         registry.register(Box::new(BashTool));
+        registry.register(Box::new(GlobTool));
+        registry.register(Box::new(GrepTool));
+        registry.register(Box::new(ListTool));
 
         registry
     }
@@ -43,7 +46,7 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub fn execute(
+    pub async fn execute(
         &self,
         name: &str,
         args: serde_json::Value,
@@ -53,7 +56,14 @@ impl ToolRegistry {
             .get(name)
             .with_context(|| format!("Unknown tool: {}", name))?;
 
-        tool.execute(args, ctx)
+        let mut result = tool.execute(args, ctx).await?;
+
+        let limit = tool.output_limit();
+        if result.output.len() > limit {
+            result.output = result.truncate_for_context(limit);
+        }
+
+        Ok(result)
     }
 }
 

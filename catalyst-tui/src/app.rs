@@ -80,6 +80,7 @@ pub struct App {
     pub pending_input: Option<String>,
     pub last_update: Instant,
     pub popup: PopupState,
+    pub status_message: String,
 }
 
 impl App {
@@ -102,6 +103,7 @@ impl App {
             pending_input: None,
             last_update: Instant::now(),
             popup: PopupState::None,
+            status_message: "Ready".to_string(),
         }
     }
 
@@ -233,6 +235,13 @@ impl App {
                     thinking: None,
                 });
                 self.is_streaming = false;
+            }
+            AgentEvent::StateChanged { to, .. } => {
+                self.status_message = to;
+            }
+            AgentEvent::Cancelled => {
+                self.is_streaming = false;
+                self.status_message = "Cancelled".to_string();
             }
         }
         self.last_update = Instant::now();

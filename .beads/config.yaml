@@ -1,4 +1,5 @@
 database: hq
-issue_prefix: hq
+issue_prefix: ca
 dolt:
   port: 3307
+  auto-start: false

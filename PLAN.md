@@ -1,2230 +1,1105 @@
-# Catalyst MVP Implementation Plan
+# Catalyst v0.2.0 — AI-Native Architecture Plan
 
-## Overview
+## What Changed
 
-This document outlines the detailed implementation plan for Catalyst MVP - a minimal, research-driven AI coding CLI with TUI support.
+v0.1.1 proved the stack works: Rust workspace, ratatui TUI, Anthropic streaming, 4 tools, 94 tests. But it's a chat wrapper with file operations. Every CLI agent has that. This plan makes Catalyst an **AI-native agent** — where the LLM is the runtime, context is a managed resource, and the agent loop is an autonomous process with guardrails.
 
-## MVP Scope
+## v0.1.1 Recap (Completed)
 
-### In Scope
-- Multi-crate Rust workspace
-- TUI with ratatui + crossterm
-- Anthropic Claude 4 API integration
-- Streaming responses with extended thinking
-- 4 core tools: read, write, edit, bash
-- Slash commands: /help, /model, /clear, /exit
-- Event-driven async architecture
-- Configuration via TOML
-
-### Out of Scope (Future)
-- TLA+ verification
-- Simulation engine
-- Multi-provider LLM support
-- Session persistence
-- File references (@file)
-- Extensions/skills system
+| Deliverable | Status |
+|---|---|
+| 5-crate Rust workspace | ✅ |
+| Anthropic + OpenRouter streaming | ✅ |
+| 4 tools (read, write, edit, bash) | ✅ |
+| ratatui TUI with popups, themes | ✅ |
+| Slash commands, cost tracking | ✅ |
+| 94 tests passing | ✅ |
+| Clippy clean, fmt clean | ✅ |
 
 ---
 
-## Phase 1: Project Setup (Day 1)
+## v0.2.0 Thesis
 
-### 1.1 Initialize Workspace
+> **An AI coding agent is only as good as its context management and tool autonomy.** The LLM is a commodity — every agent uses the same models. What separates agents is what they show the model (context), what they let it do (tools), and how they manage the loop (intelligence).
 
-```bash
-# Create workspace root
-mkdir -p catalyst/{catalyst-cli,catalyst-core,catalyst-llm,catalyst-tools,catalyst-tui}/src
+v0.2.0 makes Catalyst the first CLI agent to treat context as a first-class managed resource instead of an unbounded message array.
 
-# Initialize git
-git init
-echo "target/" > .gitignore
-echo "Cargo.lock" >> .gitignore
+### Competitive Positioning
+
+```
+                    Speed-focused
+                         │
+        Copilot ─────────┼───────── Cursor
+                        │
+     Autocomplete ──────┼────── Agent Mode
+                        │
+          Continue ─────┼───────── Aider
+                        │
+    Privacy-focused ────┼──────── Bolt.new
+                        │
+              CATALYST ─┘
+              (Context-native agent)
 ```
 
-### 1.2 Create Workspace Cargo.toml
-
-**File:** `Cargo.toml`
-
-```toml
-[workspace]
-members = [
-    "catalyst-cli",
-    "catalyst-core",
-    "catalyst-llm",
-    "catalyst-tools",
-    "catalyst-tui",
-]
-resolver = "2"
-
-[workspace.package]
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-repository = "https://github.com/catalyst/catalyst"
-authors = ["Catalyst Team"]
-
-[workspace.dependencies]
-# Async
-tokio = { version = "1", features = ["full"] }
-futures = "0.3"
-
-# TUI
-ratatui = "0.29"
-crossterm = { version = "0.28", features = ["event-stream"] }
-
-# HTTP & Serialization
-reqwest = { version = "0.12", features = ["json", "stream"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8"
-
-# Error handling
-anyhow = "1.0"
-thiserror = "2.0"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Utilities
-dirs = "6.0"
-uuid = { version = "1.11", features = ["v4"] }
-regex = "1.11"
-
-# Internal crates
-catalyst-core = { path = "catalyst-core" }
-catalyst-llm = { path = "catalyst-llm" }
-catalyst-tools = { path = "catalyst-tools" }
-catalyst-tui = { path = "catalyst-tui" }
-```
-
-### 1.3 Create Crate Cargo.toml Files
-
-**File:** `catalyst-cli/Cargo.toml`
-```toml
-[package]
-name = "catalyst-cli"
-version.workspace = true
-edition.workspace = true
-
-[[bin]]
-name = "catalyst"
-path = "src/main.rs"
-
-[dependencies]
-catalyst-core.workspace = true
-catalyst-llm.workspace = true
-catalyst-tools.workspace = true
-catalyst-tui.workspace = true
-
-tokio.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-clap = { version = "4.5", features = ["derive"] }
-```
-
-**File:** `catalyst-core/Cargo.toml`
-```toml
-[package]
-name = "catalyst-core"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-catalyst-llm.workspace = true
-catalyst-tools.workspace = true
-
-tokio.workspace = true
-futures.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-uuid.workspace = true
-```
-
-**File:** `catalyst-llm/Cargo.toml`
-```toml
-[package]
-name = "catalyst-llm"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-tokio.workspace = true
-futures.workspace = true
-reqwest.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-```
-
-**File:** `catalyst-tools/Cargo.toml`
-```toml
-[package]
-name = "catalyst-tools"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-regex.workspace = true
-```
-
-**File:** `catalyst-tui/Cargo.toml`
-```toml
-[package]
-name = "catalyst-tui"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-catalyst-core.workspace = true
-
-tokio.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
-anyhow.workspace = true
-thiserror.workspace = true
-tracing.workspace = true
-```
-
-### 1.4 Create Source Files
-
-```bash
-# Create lib.rs files
-touch catalyst-core/src/lib.rs
-touch catalyst-llm/src/lib.rs
-touch catalyst-tools/src/lib.rs
-touch catalyst-tui/src/lib.rs
-
-# Create main.rs
-touch catalyst-cli/src/main.rs
-```
-
-### 1.5 Verify Build
-
-```bash
-cargo build --workspace
-```
-
-**Deliverable:** Compiling workspace with empty crates
+**We don't compete on IDE integration (Cursor wins), browser UX (Bolt wins), or community (Aider wins). We compete on agent intelligence — specifically, how well the agent manages its own context and operates autonomously.**
 
 ---
 
-## Phase 2: LLM Client (Days 2-3)
+## What We Cut
 
-### 2.1 API Types
+These were in the v0.2.0 roadmap. They're gone.
 
-**File:** `catalyst-llm/src/types.rs`
+| Item | Why |
+|---|---|
+| Multiple color themes | Cosmetic. Doesn't differentiate. |
+| Message search/copy/paste | Nice-to-have. Not core. |
+| Conversation export (MD/JSON) | Nobody asked yet. |
+| Syntax highlighting | Use `bat` externally. |
+| Light/dark mode toggle | Cosmetic. |
+| Video tutorials | Premature. |
+| TLA+ verification | v0.3+ scope. Needs codebase intelligence first. |
+| Simulation engine | v0.3+ scope. |
+| IDE/LSP integration | Wrong market. Terminal is our home. |
+| CI/CD integration | Premature. |
+| AST parsing | v0.3 scope (tree-sitter indexing). |
+| Code completion | IDE territory. |
 
-```rust
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+---
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: Role,
-    pub content: Content,
-}
+## The 4 Pillars
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    User,
-    Assistant,
-}
+### Pillar 1: Context Engine
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum Content {
-    Text(String),
-    Blocks(Vec<ContentBlock>),
-}
+**Problem:** Messages grow unbounded. After 5 tool calls you're sending 30K+ tokens of noise. Costs explode. LLM quality degrades. Eventually hits the token ceiling and crashes.
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ContentBlock {
-    #[serde(rename = "text")]
-    Text { text: String },
-    
-    #[serde(rename = "thinking")]
-    Thinking { thinking: String },
-    
-    #[serde(rename = "tool_use")]
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
-    },
-    
-    #[serde(rename = "tool_result")]
-    ToolResult {
-        tool_use_id: String,
-        content: String,
-        #[serde(default)]
-        is_error: bool,
-    },
-}
+**Solution:** New module `catalyst-core/src/context.rs` that treats context as a managed resource with a budget.
 
-#[derive(Debug, Clone, Serialize)]
-pub struct Tool {
-    pub name: String,
-    pub description: String,
-    pub input_schema: Value,
-}
+#### Architecture
 
-#[derive(Debug, Clone, Serialize)]
-pub struct MessageRequest {
-    pub model: String,
-    pub max_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub system: Option<String>,
-    pub messages: Vec<Message>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub tools: Vec<Tool>,
-    #[serde(default)]
-    pub stream: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageResponse {
-    pub id: String,
-    pub role: Role,
-    pub content: Vec<ContentBlock>,
-    pub model: String,
-    pub usage: Usage,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct Usage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    #[serde(default)]
-    pub cache_creation_input_tokens: u64,
-    #[serde(default)]
-    pub cache_read_input_tokens: u64,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
-pub enum StreamEvent {
-    #[serde(rename = "message_start")]
-    MessageStart { message: MessageInfo },
-    
-    #[serde(rename = "content_block_start")]
-    ContentBlockStart {
-        index: usize,
-        content_block: ContentBlock,
-    },
-    
-    #[serde(rename = "content_block_delta")]
-    ContentBlockDelta {
-        index: usize,
-        delta: Delta,
-    },
-    
-    #[serde(rename = "content_block_stop")]
-    ContentBlockStop { index: usize },
-    
-    #[serde(rename = "message_delta")]
-    MessageDelta {
-        delta: MessageDeltaInfo,
-        usage: Usage,
-    },
-    
-    #[serde(rename = "message_stop")]
-    MessageStop,
-    
-    #[serde(rename = "error")]
-    Error { error: ApiError },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageInfo {
-    pub id: String,
-    pub model: String,
-    pub role: Role,
-    pub content: Vec<ContentBlock>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageDeltaInfo {
-    #[serde(default)]
-    pub stop_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type")]
-pub enum Delta {
-    #[serde(rename = "text_delta")]
-    TextDelta { text: String },
-    
-    #[serde(rename = "thinking_delta")]
-    ThinkingDelta { thinking: String },
-    
-    #[serde(rename = "input_json_delta")]
-    InputJsonDelta { partial_json: String },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ApiError {
-    #[serde(rename = "type")]
-    pub error_type: String,
-    pub message: String,
+```
+Context {
+    system: SystemPrompt,        // dynamic — includes project state, not static text
+    working: Vec<Message>,       // recent N messages, full fidelity
+    archive: Vec<Summary>,       // older messages, LLM-summarized
+    files: FileCache,            // file content cache — referenced, not inlined
+    budget: TokenBudget,         // track + enforce limits per model
 }
 ```
 
-### 2.2 Client Implementation
+#### Token Budgeting
 
-**File:** `catalyst-llm/src/client.rs`
+```
+Model: claude-sonnet-4 (200K context window)
+
+Allocation:
+  System prompt + project context:  ~2,000 tokens (fixed)
+  Tool definitions:                 ~1,000 tokens (fixed)
+  Working memory (recent messages): ~20,000 tokens (configurable)
+  Tool results (current request):   ~50,000 tokens (dynamic)
+  Archive summaries:                ~5,000 tokens (compressed)
+  ─────────────────────────────────────────────
+  Total used:                       ~78,000 tokens
+  Reserve for LLM output:           122,000 tokens
+  
+If tool results exceed budget → truncate intelligently:
+  - Keep first N lines (function signatures, imports)
+  - Keep last N lines (closing brackets, error messages)
+  - Replace middle with "... [truncated, N lines omitted]"
+```
+
+#### Sliding Window
+
+```
+Messages 1-5:    Full fidelity in working memory
+Messages 6-10:   Summarized into archive (LLM generates summary)
+Messages 11+:    Dropped from active context (archived to disk)
+
+On session resume:  Load archive summaries, not full history
+On context overflow: Trigger emergency summarization
+```
+
+#### File Content Cache
+
+```
+Current behavior (v0.1.1):
+  Tool reads file → full content inlined into message → sent to LLM every turn
+
+v0.2 behavior:
+  Tool reads file → content cached → reference sent to LLM:
+    "[File: src/main.rs — 232 lines, cached. Use read to view specific sections.]"
+  
+  When LLM needs the file:
+    - Full content sent once (first reference)
+    - Subsequent references: diff-only if edited, or cache hit
+    
+  Cache invalidation:
+    - File mtime changed → re-read and update cache
+    - File edited by agent → update cache with new content
+```
+
+#### Implementation
+
+**File:** `catalyst-core/src/context.rs`
 
 ```rust
-use anyhow::{Context, Result};
-use futures::{Stream, StreamExt};
-use reqwest::Client;
-use serde_json::json;
-use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
-
-use crate::types::*;
-
-pub struct AnthropicClient {
-    http: Client,
-    api_key: String,
-    model: String,
-    base_url: String,
+pub struct ContextEngine {
+    /// Token counting backend
+    counter: TokenCounter,
+    /// Maximum tokens for this model
+    max_context: usize,
+    /// Recent messages kept in full
+    working_window: usize,
+    /// File content cache
+    file_cache: FileCache,
+    /// Summarized older messages
+    archive: Vec<Summary>,
 }
 
-impl AnthropicClient {
-    pub fn new(api_key: String, model: String) -> Self {
-        Self {
-            http: Client::new(),
-            api_key,
-            model,
-            base_url: "https://api.anthropic.com".to_string(),
-        }
-    }
-    
-    pub fn with_base_url(mut self, base_url: String) -> Self {
-        self.base_url = base_url;
-        self
-    }
-    
-    pub async fn stream(
+impl ContextEngine {
+    /// Build the final message array to send to the LLM
+    pub fn build_messages(
         &self,
-        system: Option<&str>,
-        messages: Vec<Message>,
-        tools: Vec<Tool>,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent>> + Send>>> {
-        let request = MessageRequest {
-            model: self.model.clone(),
-            max_tokens: 4096,
-            system: system.map(|s| s.to_string()),
-            messages,
-            tools,
-            stream: true,
-        };
-        
-        let response = self.http
-            .post(format!("{}/v1/messages", self.base_url))
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&request)
-            .send()
-            .await
-            .context("Failed to send request to Anthropic API")?;
-        
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            anyhow::bail!("API error ({}): {}", status, body);
-        }
-        
-        Ok(Box::pin(parse_sse_stream(response)))
-    }
-}
-
-struct StreamState {
-    response: reqwest::Response,
-    buffer: String,
-}
-
-fn parse_sse_stream(
-    response: reqwest::Response,
-) -> impl Stream<Item = Result<StreamEvent>> {
-    let state = Arc::new(Mutex::new(StreamState {
-        response,
-        buffer: String::new(),
-    }));
+        messages: &[Message],
+        system_prompt: &str,
+        tools: &[ToolDef],
+    ) -> Vec<Message>;
     
-    futures::stream::unfold(state, |state| async move {
-        let mut guard = state.lock().await;
-        
-        loop {
-            // Try to parse complete events from buffer first
-            while let Some(pos) = guard.buffer.find("\n\n") {
-                let event_str = guard.buffer.drain(..pos + 2).collect::<String>();
-                
-                for line in event_str.lines() {
-                    if let Some(json_str) = line.strip_prefix("data: ") {
-                        if json_str.is_empty() {
-                            continue;
-                        }
-                        
-                        match serde_json::from_str::<StreamEvent>(json_str) {
-                            Ok(event) => {
-                                return Some((Ok(event), state));
-                            }
-                            Err(e) => {
-                                debug!("Failed to parse event: {} - {}", e, json_str);
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Need more data
-            match guard.response.chunk().await {
-                Ok(Some(chunk)) => {
-                    guard.buffer.push_str(&String::from_utf8_lossy(&chunk));
-                }
-                Ok(None) => {
-                    // Stream ended, process remaining buffer
-                    if guard.buffer.is_empty() {
-                        return None;
-                    }
-                    // Try to parse remaining data
-                    let remaining = guard.buffer.drain(..).collect::<String>();
-                    debug!("Stream ended with unprocessed data: {}", remaining);
-                    return None;
-                }
-                Err(e) => {
-                    return Some((Err(anyhow::anyhow!("Stream error: {}", e)), state));
-                }
-            }
-        }
-    })
+    /// Check if adding a tool result would overflow the budget
+    pub fn would_overflow(&self, additional_tokens: usize) -> bool;
+    
+    /// Truncate a tool result to fit within budget
+    pub fn truncate_output(&self, output: &str, budget: usize) -> String;
+    
+    /// Summarize old messages into archive
+    pub async fn summarize_old_messages(
+        &mut self,
+        messages: &[Message],
+        provider: &dyn LlmProvider,
+    ) -> Result<Vec<Summary>>;
+    
+    /// Get or cache file content
+    pub fn cache_file(&mut self, path: &Path, content: String) -> FileRef;
+    
+    /// Check if cached file is still valid (mtime check)
+    pub fn is_cache_valid(&self, path: &Path) -> bool;
+}
+
+pub struct TokenBudget {
+    pub system_prompt: usize,
+    pub tool_definitions: usize,
+    pub working_memory: usize,
+    pub tool_results: usize,
+    pub archive: usize,
+    pub reserve_output: usize,
+    pub model_limit: usize,
+}
+
+pub struct FileCache {
+    entries: HashMap<PathBuf, CachedFile>,
+}
+
+pub struct CachedFile {
+    content: String,
+    mtime: std::time::SystemTime,
+    token_count: usize,
+    referenced_at: std::time::Instant,
+}
+
+pub struct Summary {
+    /// What the user asked
+    topic: String,
+    /// What the agent did
+    actions: Vec<String>,
+    /// Key decisions or results
+    outcomes: Vec<String>,
+    /// Token count of this summary
+    token_count: usize,
 }
 ```
 
-### 2.3 Module Exports
-
-**File:** `catalyst-llm/src/lib.rs`
-
-```rust
-mod client;
-mod types;
-
-pub use client::*;
-pub use types::*;
-
-pub type Result<T> = anyhow::Result<T>;
-```
-
-**Deliverable:** Working LLM client with streaming
+**Dependencies added:**
+- `tiktoken-rs` or similar for token counting
+- No new external crate for caching — use `HashMap` with mtime checks
 
 ---
 
-## Phase 3: Tool System (Days 4-5)
+### Pillar 2: Rich Tool System
 
-### 3.1 Tool Trait
+**Problem:** The agent is blind. It can read/write/edit individual files, but can't discover files, search content, or understand project structure. Without `glob`/`grep`/`list`, multi-file work requires the LLM to guess paths.
 
-**File:** `catalyst-tools/src/lib.rs`
+**Solution:** 3 new tools + async tool trait + smart output truncation.
+
+#### New Tools
+
+**`glob` — Find files by pattern**
 
 ```rust
-mod registry;
-mod read;
-mod write;
-mod edit;
-mod bash;
+pub struct GlobTool;
 
-pub use registry::*;
-pub use read::*;
-pub use write::*;
-pub use edit::*;
-pub use bash::*;
-
-use anyhow::Result;
-use serde_json::{json, Value};
-use std::collections::HashMap;
-
-pub struct ToolContext {
-    pub working_dir: std::path::PathBuf,
-    pub env: HashMap<String, String>,
-    pub timeout_ms: u64,
-}
-
-pub struct ToolResult {
-    pub output: String,
-    pub metadata: HashMap<String, Value>,
-}
-
-impl ToolResult {
-    pub fn success(output: impl Into<String>) -> Self {
-        Self {
-            output: output.into(),
-            metadata: HashMap::new(),
-        }
+impl Tool for GlobTool {
+    fn name(&self) -> &str { "glob" }
+    
+    fn description(&self) -> &str {
+        "Find files matching a glob pattern. Returns matched file paths relative to working directory."
     }
     
-    pub fn error(message: impl Into<String>) -> Self {
-        Self {
-            output: format!("Error: {}", message.into()),
-            metadata: HashMap::new(),
-        }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern (e.g. **/*.rs, src/**/*.ts, **/test*)"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return",
+                    "default": 100
+                }
+            },
+            "required": ["pattern"]
+        })
     }
 }
+```
 
+Implementation: use the `glob` crate. Returns paths sorted by modification time (most recent first). Truncates at `max_results` (default 100) to prevent context bloat.
+
+**`grep` — Search file contents**
+
+```rust
+pub struct GrepTool;
+
+impl Tool for GrepTool {
+    fn name(&self) -> &str { "grep" }
+    
+    fn description(&self) -> &str {
+        "Search file contents using regex. Returns matching lines with file paths and line numbers."
+    }
+    
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Regex pattern to search for"
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Directory or file to search in (default: working directory)"
+                },
+                "include": {
+                    "type": "string",
+                    "description": "File glob to include (e.g. *.rs, *.ts)"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum matching lines to return",
+                    "default": 50
+                }
+            },
+            "required": ["pattern"]
+        })
+    }
+}
+```
+
+Implementation: use the `regex` crate. Walk directory, filter by `include` glob, match lines. Returns `file:line: content` format. Truncates at `max_results` (default 50).
+
+**`list` — Directory listing**
+
+```rust
+pub struct ListTool;
+
+impl Tool for ListTool {
+    fn name(&self) -> &str { "list" }
+    
+    fn description(&self) -> &str {
+        "List directory contents with file metadata. Returns file names, sizes, and types."
+    }
+    
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to list (default: working directory)"
+                },
+                "recursive": {
+                    "type": "boolean",
+                    "description": "List recursively",
+                    "default": false
+                },
+                "max_depth": {
+                    "type": "integer",
+                    "description": "Maximum recursion depth",
+                    "default": 3
+                }
+            },
+            "required": []
+        })
+    }
+}
+```
+
+Implementation: `std::fs::read_dir`. Returns entries with file type indicator (`/` for dirs, `*` for executable, nothing for regular files), size in human-readable format. Skips `target/`, `node_modules/`, `.git/` automatically.
+
+#### Async Tool Trait
+
+```rust
+// Current (v0.1.1) — sync, blocking
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
     fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult>;
+    fn clone_box(&self) -> Box<dyn Tool>;
+}
+
+// v0.2 — async, streaming-capable
+#[async_trait]
+pub trait Tool: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters(&self) -> Value;
+    
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult>;
+    
+    /// Maximum output size in characters. Results beyond this are truncated.
+    fn output_limit(&self) -> usize { 10_000 }
+    
+    fn clone_box(&self) -> Box<dyn Tool>;
 }
 ```
 
-### 3.2 Read Tool
+Why async: `grep` on large codebases and `glob` with many matches benefit from async I/O. `bash` already uses `spawn_blocking` — making tools async is cleaner.
 
-**File:** `catalyst-tools/src/read.rs`
+#### Smart Output Truncation
 
 ```rust
-use super::*;
-use anyhow::{bail, Context};
-use std::fs;
-
-pub struct ReadTool;
-
-impl Tool for ReadTool {
-    fn name(&self) -> &str {
-        "read"
-    }
-    
-    fn description(&self) -> &str {
-        "Read a file from the filesystem. Returns the file contents with line numbers."
-    }
-    
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The absolute or relative path to the file to read"
-                },
-                "offset": {
-                    "type": "integer",
-                    "description": "Line number to start reading from (1-indexed)",
-                    "default": 1
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of lines to read",
-                    "default": 2000
-                }
-            },
-            "required": ["path"]
-        })
-    }
-    
-    fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let path = args["path"].as_str()
-            .context("path required")?;
-        
-        let path = ctx.working_dir.join(path);
-        
-        // Validate path is within working directory (security)
-        let canonical_path = path.canonicalize()
-            .with_context(|| format!("Path does not exist: {}", path.display()))?;
-        let canonical_working_dir = ctx.working_dir.canonicalize()
-            .context("Working directory does not exist")?;
-        
-        if !canonical_path.starts_with(&canonical_working_dir) {
-            bail!("Path '{}' is outside working directory", canonical_path.display());
+impl ToolResult {
+    /// Truncate output to fit within token budget.
+    /// Preserves start and end, replaces middle with summary.
+    pub fn truncate_for_context(&self, max_chars: usize) -> String {
+        if self.output.len() <= max_chars {
+            return self.output.clone();
         }
         
-        let offset = args.get("offset")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as usize;
+        let head_chars = max_chars / 3;
+        let tail_chars = max_chars / 3;
         
-        let limit = args.get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(2000) as usize;
+        let head: String = self.output.chars().take(head_chars).collect();
+        let tail: String = self.output.chars()
+            .rev().take(tail_chars).collect::<String>()
+            .chars().rev().collect();
+        let omitted = self.output.len() - head_chars - tail_chars;
         
-        // Use blocking I/O (tools run in spawn_blocking context)
-        let content = fs::read_to_string(&canonical_path)
-            .with_context(|| format!("Failed to read file: {}", canonical_path.display()))?;
-        
-        let lines: Vec<_> = content
-            .lines()
-            .skip(offset.saturating_sub(1))
-            .take(limit)
-            .enumerate()
-            .map(|(i, line)| format!("{:>6}\t{}", offset + i, line))
-            .collect();
-        
-        Ok(ToolResult::success(lines.join("\n")))
+        format!(
+            "{}\n\n... [truncated: {} characters omitted] ...\n\n{}",
+            head, omitted, tail
+        )
     }
 }
 ```
 
-### 3.3 Write Tool
-
-**File:** `catalyst-tools/src/write.rs`
+#### Tool Registry Update
 
 ```rust
-use super::*;
-use anyhow::{bail, Context};
-use std::fs;
-
-pub struct WriteTool;
-
-impl Tool for WriteTool {
-    fn name(&self) -> &str {
-        "write"
-    }
-    
-    fn description(&self) -> &str {
-        "Write content to a new file. Fails if file already exists."
-    }
-    
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The path where the file should be created"
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write to the file"
-                }
-            },
-            "required": ["path", "content"]
-        })
-    }
-    
-    fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let path = args["path"].as_str()
-            .context("path required")?;
-        let content = args["content"].as_str()
-            .context("content required")?;
-        
-        let path = ctx.working_dir.join(path);
-        
-        if path.exists() {
-            bail!("File already exists: {}. Use edit tool instead.", path.display());
-        }
-        
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .context("Failed to create parent directories")?;
-        }
-        
-        fs::write(&path, content)
-            .with_context(|| format!("Failed to write file: {}", path.display()))?;
-        
-        Ok(ToolResult::success(format!("File created: {}", path.display())))
-    }
-}
-```
-
-### 3.4 Edit Tool
-
-**File:** `catalyst-tools/src/edit.rs`
-
-```rust
-use super::*;
-use anyhow::{bail, Context};
-use std::fs;
-
-pub struct EditTool;
-
-impl Tool for EditTool {
-    fn name(&self) -> &str {
-        "edit"
-    }
-    
-    fn description(&self) -> &str {
-        "Edit an existing file by replacing specific text. The old_string must match exactly."
-    }
-    
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The path to the file to edit"
-                },
-                "old_string": {
-                    "type": "string",
-                    "description": "The exact text to find and replace"
-                },
-                "new_string": {
-                    "type": "string",
-                    "description": "The text to replace it with"
-                },
-                "replace_all": {
-                    "type": "boolean",
-                    "description": "Replace all occurrences",
-                    "default": false
-                }
-            },
-            "required": ["path", "old_string", "new_string"]
-        })
-    }
-    
-    fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let path = args["path"].as_str()
-            .context("path required")?;
-        let old_string = args["old_string"].as_str()
-            .context("old_string required")?;
-        let new_string = args["new_string"].as_str()
-            .context("new_string required")?;
-        let replace_all = args.get("replace_all")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        
-        let path = ctx.working_dir.join(path);
-        
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
-        
-        let occurrences = content.matches(old_string).count();
-        
-        if occurrences == 0 {
-            bail!("old_string not found in file: {}", path.display());
-        }
-        
-        if occurrences > 1 && !replace_all {
-            bail!(
-                "Found {} occurrences. Set replace_all=true or provide more context.",
-                occurrences
-            );
-        }
-        
-        let new_content = if replace_all {
-            content.replace(old_string, new_string)
-        } else {
-            content.replacen(old_string, new_string, 1)
-        };
-        
-        fs::write(&path, &new_content)
-            .with_context(|| format!("Failed to write file: {}", path.display()))?;
-        
-        Ok(ToolResult::success(format!(
-            "Replaced {} occurrence(s) in {}",
-            occurrences,
-            path.display()
-        )))
-    }
-}
-```
-
-### 3.5 Bash Tool
-
-**File:** `catalyst-tools/src/bash.rs`
-
-```rust
-use super::*;
-use anyhow::{bail, Context};
-use std::process::{Command, Stdio};
-
-pub struct BashTool;
-
-impl Tool for BashTool {
-    fn name(&self) -> &str {
-        "bash"
-    }
-    
-    fn description(&self) -> &str {
-        "Execute a shell command. Use for git, npm, cargo, etc. Not for file operations."
-    }
-    
-    fn parameters(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The command to execute"
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Timeout in milliseconds",
-                    "default": 120000
-                }
-            },
-            "required": ["command"]
-        })
-    }
-    
-    fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let command = args["command"].as_str()
-            .context("command required")?;
-        
-        // Basic safety check
-        let dangerous_patterns = ["rm -rf /", "sudo rm", "> /dev/sd"];
-        for pattern in &dangerous_patterns {
-            if command.contains(pattern) {
-                bail!("Blocked dangerous command pattern: {}", pattern);
-            }
-        }
-        
-        // Use spawn_blocking for async safety
-        let working_dir = ctx.working_dir.clone();
-        let command = command.to_string();
-        let timeout_ms = ctx.timeout_ms;
-        
-        let output = std::thread::spawn(move || {
-            Command::new("bash")
-                .arg("-c")
-                .arg(&command)
-                .current_dir(&working_dir)
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-        }).join()
-            .map_err(|_| anyhow::anyhow!("Command execution panicked"))?
-            .context("Failed to execute command")?;
-        
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        
-        let result = if output.status.success() {
-            stdout.to_string()
-        } else {
-            format!(
-                "Exit code: {}\n{}\n{}",
-                output.status.code().unwrap_or(-1),
-                stderr,
-                stdout
-            )
-        };
-        
-        Ok(ToolResult::success(result))
-    }
-}
-```
-
-### 3.6 Tool Registry
-
-**File:** `catalyst-tools/src/registry.rs`
-
-```rust
-use super::*;
-use std::collections::HashMap;
-
-pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
-}
-
+// Registry now supports async execution
 impl ToolRegistry {
-    pub fn new() -> Self {
-        let mut registry = Self {
-            tools: HashMap::new(),
-        };
-        
-        registry.register(Box::new(ReadTool));
-        registry.register(Box::new(WriteTool));
-        registry.register(Box::new(EditTool));
-        registry.register(Box::new(BashTool));
-        
-        registry
-    }
+    pub async fn execute(
+        &self,
+        name: &str,
+        args: Value,
+        ctx: &ToolContext,
+    ) -> Result<ToolResult>;
     
-    pub fn register(&mut self, tool: Box<dyn Tool>) {
-        self.tools.insert(tool.name().to_string(), tool);
-    }
+    /// Get tools as Anthropic-format definitions
+    pub fn to_anthropic_tools(&self) -> Vec<Value>;  // unchanged
     
-    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.as_ref())
-    }
-    
-    pub fn to_anthropic_tools(&self) -> Vec<serde_json::Value> {
-        self.tools.values().map(|tool| {
-            serde_json::json!({
-                "name": tool.name(),
-                "description": tool.description(),
-                "input_schema": tool.parameters()
-            })
-        }).collect()
-    }
-    
-    pub fn execute(&self, name: &str, args: serde_json::Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let tool = self.get(name)
-            .with_context(|| format!("Unknown tool: {}", name))?;
-        
-        tool.execute(args, ctx)
-    }
-}
-
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Get the output limit for a specific tool
+    pub fn output_limit(&self, name: &str) -> usize;
 }
 ```
 
-**Deliverable:** Working tool system with 4 tools
+**Dependencies added:**
+- `glob` crate for file pattern matching
+- `regex` crate for content search
 
 ---
 
-## Phase 4: Core Agent (Days 6-7)
+### Pillar 3: Agent Loop Intelligence
 
-### 4.1 Agent State
+**Problem:** The current agent loop is naive: stream → detect tool → execute → recurse. No planning, no error recovery, no cancellation, no iteration limit. A runaway tool-use loop will burn tokens until the context window fills up and the API returns an error.
 
-**File:** `catalyst-core/src/agent.rs`
+**Solution:** Structured execution with guardrails.
+
+#### Current Flow (v0.1.1)
+
+```
+User → send() → process_stream() → [tool call] → process_stream() → ... → Complete
+                     ↑                                                    │
+                     └────────── recursive Box::pin() ←──────────────────┘
+                   (unbounded recursion, no guardrails)
+```
+
+#### New Flow (v0.2)
+
+```
+User → send() → AgentLoop::run()
+                      │
+                      ▼
+                 ┌──────────┐
+                 │ Planning │ ← Inject system context, project state
+                 └────┬─────┘
+                      │
+                      ▼
+              ┌──────────────┐
+              │  Executing   │ ← Stream LLM, detect tool calls
+              │  (iterate)   │ ← Max 25 iterations per request
+              └──┬───────┬──┘
+                 │       │
+            tool call   complete
+                 │       │
+                 ▼       ▼
+          ┌──────────┐  ┌──────────┐
+          │  Verify  │  │ Complete │ ← Emit AgentEvent::Complete
+          │(optional)│  └──────────┘
+          └────┬─────┘
+               │
+          retry needed?
+               │
+         ┌─────┴─────┐
+         Yes         No
+         │            │
+         ▼            ▼
+    back to       ┌──────────┐
+    Executing     │  Done    │
+                  └──────────┘
+```
+
+#### Agent State Machine
 
 ```rust
-use anyhow::Result;
-use catalyst_llm::{AnthropicClient, Content, ContentBlock, Message, Role, StreamEvent, Tool};
-use catalyst_tools::{ToolContext, ToolRegistry, ToolResult};
-use futures::StreamExt;
-use serde_json::Value;
-use std::collections::HashMap;
-use tokio::sync::mpsc;
-use tracing::{debug, info};
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentState {
+    /// Ready for user input
+    Idle,
+    /// Building context, preparing request
+    Planning,
+    /// Streaming LLM response, processing tool calls
+    Executing { iteration: usize },
+    /// Verifying tool results before continuing
+    Verifying,
+    /// Agent finished, response complete
+    Complete,
+    /// Unrecoverable error
+    Error(String),
+    /// User cancelled via Ctrl+C
+    Cancelled,
+}
+```
 
-pub struct Agent {
-    client: AnthropicClient,
-    tools: ToolRegistry,
-    messages: Vec<Message>,
-    system_prompt: String,
-    working_dir: std::path::PathBuf,
+#### Guardrails
+
+```rust
+pub struct AgentConfig {
+    /// Maximum tool calls per user request (prevents runaway loops)
+    pub max_iterations: usize,          // default: 25
+    
+    /// Maximum total tokens spent per request (cost guard)
+    pub max_tokens_per_request: usize,  // default: 200_000
+    
+    /// Whether to automatically retry on tool errors
+    pub auto_retry: bool,              // default: true
+    
+    /// Maximum retries per tool call
+    pub max_retries: usize,            // default: 2
+    
+    /// Whether to inject project context into system prompt
+    pub project_awareness: bool,       // default: true
+}
+```
+
+#### Cancellation
+
+```rust
+pub struct AgentLoop {
+    state: AgentState,
+    config: AgentConfig,
+    cancel: CancellationToken,
 }
 
-pub enum AgentEvent {
-    TextDelta { text: String },
-    ThinkingDelta { thinking: String },
-    ToolCall { id: String, name: String, args: Value },
-    ToolResult { id: String, result: String, is_error: bool },
-    Complete,
-    Error(String),
+impl AgentLoop {
+    /// Cancel the current operation. Agent emits AgentEvent::Cancelled
+    /// and returns a partial response (whatever was generated so far).
+    pub fn cancel(&mut self) {
+        self.cancel.cancel();
+        self.state = AgentState::Cancelled;
+    }
+}
+
+// In TUI: Ctrl+C during streaming → cancel agent
+// In TUI: Esc during streaming → pause (show thinking so far, ask continue/cancel)
+```
+
+#### Implementation
+
+**File:** `catalyst-core/src/agent.rs` (restructured)
+
+```rust
+pub struct Agent {
+    provider: Box<dyn LlmProvider + Send + Sync>,
+    tools: ToolRegistry,
+    messages: Vec<Message>,
+    context: ContextEngine,      // NEW
+    project: ProjectContext,     // NEW
+    config: AgentConfig,         // NEW
+    state: AgentState,           // NEW
+    cancel: CancellationToken,   // NEW
 }
 
 impl Agent {
-    pub fn new(client: AnthropicClient, tools: ToolRegistry, working_dir: std::path::PathBuf) -> Self {
-        Self {
-            client,
-            tools,
-            messages: Vec::new(),
-            system_prompt: DEFAULT_SYSTEM_PROMPT.to_string(),
-            working_dir,
-        }
-    }
-    
-    pub fn set_system_prompt(&mut self, prompt: String) {
-        self.system_prompt = prompt;
-    }
-    
     pub async fn send(
         &mut self,
         user_message: String,
         tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<()> {
-        // Add user message
+        self.state = AgentState::Planning;
+        
+        // 1. Add user message
         self.messages.push(Message {
             role: Role::User,
             content: Content::Text(user_message),
         });
         
-        // Get anthropic tools
-        let anthropic_tools = self.tools.to_anthropic_tools();
+        // 2. Build system prompt with project context
+        let system = self.build_system_prompt();
         
-        // Stream response
-        let mut stream = self.client.stream(
-            Some(&self.system_prompt),
-            self.messages.clone(),
-            anthropic_tools,
-        ).await?;
-        
-        let mut assistant_content: Vec<ContentBlock> = Vec::new();
-        let mut current_text = String::new();
-        let mut current_thinking = String::new();
-        let mut current_tool_call: Option<(String, String, String)> = None;
-        
-        while let Some(event) = stream.next().await {
-            match event? {
-                StreamEvent::ContentBlockStart { content_block, .. } => {
-                    match content_block {
-                        ContentBlock::Text { .. } => {
-                            current_text.clear();
-                        }
-                        ContentBlock::Thinking { .. } => {
-                            current_thinking.clear();
-                        }
-                        ContentBlock::ToolUse { id, name, .. } => {
-                            current_tool_call = Some((id, name, String::new()));
-                        }
-                        _ => {}
-                    }
-                }
-                
-                StreamEvent::ContentBlockDelta { delta, .. } => {
-                    match delta {
-                        catalyst_llm::Delta::TextDelta { text } => {
-                            current_text.push_str(&text);
-                            let _ = tx.send(AgentEvent::TextDelta { text });
-                        }
-                        catalyst_llm::Delta::ThinkingDelta { thinking } => {
-                            current_thinking.push_str(&thinking);
-                            let _ = tx.send(AgentEvent::ThinkingDelta { thinking });
-                        }
-                        catalyst_llm::Delta::InputJsonDelta { partial_json } => {
-                            if let Some((_, _, ref mut args)) = current_tool_call {
-                                args.push_str(&partial_json);
-                            }
-                        }
-                    }
-                }
-                
-                StreamEvent::ContentBlockStop { .. } => {
-                    if !current_text.is_empty() {
-                        assistant_content.push(ContentBlock::Text {
-                            text: current_text.clone(),
-                        });
-                        current_text.clear();
-                    }
-                    
-                    if !current_thinking.is_empty() {
-                        assistant_content.push(ContentBlock::Thinking {
-                            thinking: current_thinking.clone(),
-                        });
-                        current_thinking.clear();
-                    }
-                    
-                    if let Some((id, name, args_json)) = current_tool_call.take() {
-                        let args: Value = serde_json::from_str(&args_json)
-                            .unwrap_or(Value::Object(serde_json::Map::new()));
-                        
-                        assistant_content.push(ContentBlock::ToolUse {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: args.clone(),
-                        });
-                        
-                        let _ = tx.send(AgentEvent::ToolCall {
-                            id: id.clone(),
-                            name: name.clone(),
-                            args: args.clone(),
-                        });
-                        
-                        // Execute tool in blocking context to avoid blocking async runtime
-                        let tools = self.tools.clone();
-                        let name_clone = name.clone();
-                        let args_clone = args.clone();
-                        let working_dir = self.working_dir.clone();
-                        
-                        let result = tokio::task::spawn_blocking(move || {
-                            let ctx = ToolContext {
-                                working_dir,
-                                env: HashMap::new(),
-                                timeout_ms: 120_000,
-                            };
-                            tools.execute(&name_clone, args_clone, &ctx)
-                        }).await
-                          .context("Tool execution panicked")?
-                          .context("Tool execution failed")?;
-                        
-                        let (output, is_error) = match result {
-                            Ok(r) => (r.output, false),
-                            Err(e) => (e.to_string(), true),
-                        };
-                        
-                        let _ = tx.send(AgentEvent::ToolResult {
-                            id: id.clone(),
-                            result: output.clone(),
-                            is_error,
-                        });
-                        
-                        // Add tool result to messages
-                        self.messages.push(Message {
-                            role: Role::Assistant,
-                            content: Content::Blocks(assistant_content.clone()),
-                        });
-                        
-                        self.messages.push(Message {
-                            role: Role::User,
-                            content: Content::Blocks(vec![ContentBlock::ToolResult {
-                                tool_use_id: id,
-                                content: output,
-                                is_error,
-                            }]),
-                        });
-                        
-                        // Continue conversation with tool result
-                        return self.continue_conversation(tx).await;
-                    }
-                }
-                
-                StreamEvent::MessageStop => {
-                    if !assistant_content.is_empty() {
-                        self.messages.push(Message {
-                            role: Role::Assistant,
-                            content: Content::Blocks(assistant_content),
-                        });
-                    }
-                    let _ = tx.send(AgentEvent::Complete);
-                }
-                
-                StreamEvent::Error { error } => {
-                    let _ = tx.send(AgentEvent::Error(error.message));
-                }
-                
-                _ => {}
-            }
-        }
-        
-        Ok(())
+        // 3. Execute agent loop with guardrails
+        self.execute_loop(system, tx).await
     }
     
-    async fn continue_conversation(
+    async fn execute_loop(
         &mut self,
+        system: String,
         tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<()> {
-        // Get anthropic tools
-        let anthropic_tools = self.tools.to_anthropic_tools();
+        let mut iteration = 0;
         
-        // Stream response (no user message - continuing from tool result)
-        let mut stream = self.client.stream(
-            Some(&self.system_prompt),
-            self.messages.clone(),
-            anthropic_tools,
-        ).await?;
-        
-        let mut assistant_content: Vec<ContentBlock> = Vec::new();
-        let mut current_text = String::new();
-        let mut current_thinking = String::new();
-        let mut current_tool_call: Option<(String, String, String)> = None;
-        
-        while let Some(event) = stream.next().await {
-            match event? {
-                StreamEvent::ContentBlockStart { content_block, .. } => {
-                    match content_block {
-                        ContentBlock::Text { .. } => {
-                            current_text.clear();
-                        }
-                        ContentBlock::Thinking { .. } => {
-                            current_thinking.clear();
-                        }
-                        ContentBlock::ToolUse { id, name, .. } => {
-                            current_tool_call = Some((id, name, String::new()));
-                        }
-                        _ => {}
-                    }
-                }
-                
-                StreamEvent::ContentBlockDelta { delta, .. } => {
-                    match delta {
-                        catalyst_llm::Delta::TextDelta { text } => {
-                            current_text.push_str(&text);
-                            let _ = tx.send(AgentEvent::TextDelta { text });
-                        }
-                        catalyst_llm::Delta::ThinkingDelta { thinking } => {
-                            current_thinking.push_str(&thinking);
-                            let _ = tx.send(AgentEvent::ThinkingDelta { thinking });
-                        }
-                        catalyst_llm::Delta::InputJsonDelta { partial_json } => {
-                            if let Some((_, _, ref mut args)) = current_tool_call {
-                                args.push_str(&partial_json);
-                            }
-                        }
-                    }
-                }
-                
-                StreamEvent::ContentBlockStop { .. } => {
-                    if !current_text.is_empty() {
-                        assistant_content.push(ContentBlock::Text {
-                            text: current_text.clone(),
-                        });
-                        current_text.clear();
-                    }
-                    
-                    if !current_thinking.is_empty() {
-                        assistant_content.push(ContentBlock::Thinking {
-                            thinking: current_thinking.clone(),
-                        });
-                        current_thinking.clear();
-                    }
-                    
-                    if let Some((id, name, args_json)) = current_tool_call.take() {
-                        let args: Value = serde_json::from_str(&args_json)
-                            .unwrap_or(Value::Object(serde_json::Map::new()));
-                        
-                        assistant_content.push(ContentBlock::ToolUse {
-                            id: id.clone(),
-                            name: name.clone(),
-                            input: args.clone(),
-                        });
-                        
-                        let _ = tx.send(AgentEvent::ToolCall {
-                            id: id.clone(),
-                            name: name.clone(),
-                            args: args.clone(),
-                        });
-                        
-                        // Execute tool in blocking context
-                        let tools = self.tools.clone();
-                        let name_clone = name.clone();
-                        let args_clone = args.clone();
-                        let working_dir = self.working_dir.clone();
-                        
-                        let result = tokio::task::spawn_blocking(move || {
-                            let ctx = ToolContext {
-                                working_dir,
-                                env: HashMap::new(),
-                                timeout_ms: 120_000,
-                            };
-                            tools.execute(&name_clone, args_clone, &ctx)
-                        }).await
-                          .context("Tool execution panicked")?
-                          .context("Tool execution failed")?;
-                        
-                        let (output, is_error) = (result.output, false);
-                        
-                        let _ = tx.send(AgentEvent::ToolResult {
-                            id: id.clone(),
-                            result: output.clone(),
-                            is_error,
-                        });
-                        
-                        // Add tool result to messages
-                        self.messages.push(Message {
-                            role: Role::Assistant,
-                            content: Content::Blocks(assistant_content.clone()),
-                        });
-                        
-                        self.messages.push(Message {
-                            role: Role::User,
-                            content: Content::Blocks(vec![ContentBlock::ToolResult {
-                                tool_use_id: id,
-                                content: output,
-                                is_error,
-                            }]),
-                        });
-                        
-                        // Recursively continue if more tool calls needed
-                        return Box::pin(self.continue_conversation(tx)).await;
-                    }
-                }
-                
-                StreamEvent::MessageStop => {
-                    if !assistant_content.is_empty() {
-                        self.messages.push(Message {
-                            role: Role::Assistant,
-                            content: Content::Blocks(assistant_content),
-                        });
-                    }
-                    let _ = tx.send(AgentEvent::Complete);
-                }
-                
-                StreamEvent::Error { error } => {
-                    let _ = tx.send(AgentEvent::Error(error.message));
-                }
-                
-                _ => {}
+        loop {
+            // Guard: max iterations
+            if iteration >= self.config.max_iterations {
+                let _ = tx.send(AgentEvent::Error(
+                    format!("Max iterations ({}) reached. Stopping to prevent runaway.", 
+                            self.config.max_iterations)
+                ));
+                self.state = AgentState::Complete;
+                return Ok(());
+            }
+            
+            // Guard: cancelled
+            if self.cancel.is_cancelled() {
+                self.state = AgentState::Cancelled;
+                let _ = tx.send(AgentEvent::Cancelled);
+                return Ok(());
+            }
+            
+            self.state = AgentState::Executing { iteration };
+            iteration += 1;
+            
+            // Build context-managed messages
+            let messages = self.context.build_messages(
+                &self.messages,
+                &system,
+                &self.tools.to_anthropic_tools(),
+            );
+            
+            // Stream LLM response
+            let mut stream = self.provider.stream(
+                Some(&system),
+                messages,
+                self.tools.to_anthropic_tools(),
+            ).await?;
+            
+            // Process stream events (same as v0.1.1 but with guards)
+            let should_continue = self.process_stream(&mut stream, &tx).await?;
+            
+            if !should_continue {
+                self.state = AgentState::Complete;
+                return Ok(());
             }
         }
-        
-        Ok(())
     }
 }
-
-const DEFAULT_SYSTEM_PROMPT: &str = r#"
-You are Catalyst, a research-driven AI coding agent.
-
-Your philosophy:
-- Research best practices before making changes
-- Explain WHY you make each choice
-- Challenge user assumptions when wrong
-- Prioritize correctness over speed
-- Write stable, secure, flawless code
-
-When editing code:
-1. Read the relevant files first
-2. Understand the context
-3. Make minimal, focused changes
-4. Verify your changes work
-
-Available tools:
-- read: Read file contents
-- write: Create new files
-- edit: Edit existing files
-- bash: Execute shell commands
-
-Always think through problems carefully before acting.
-"#;
 ```
 
-### 4.2 Module Exports
-
-**File:** `catalyst-core/src/lib.rs`
-
-```rust
-mod agent;
-
-pub use agent::*;
-
-pub type Result<T> = anyhow::Result<T>;
-```
-
-**Deliverable:** Working agent with streaming
+**Dependencies added:**
+- `tokio-util` for `CancellationToken` (or implement our own with `Arc<AtomicBool>`)
 
 ---
 
-## Phase 5: TUI (Days 8-10)
+### Pillar 4: Project Awareness
 
-### 5.1 App State
+**Problem:** The agent starts every conversation blind. It doesn't know what files exist, what language the project is, whether git is initialized, or what's recently changed. Every other serious agent injects project context.
 
-**File:** `catalyst-tui/src/app.rs`
+**Solution:** Auto-index on startup, inject into system prompt.
+
+#### Project Index
 
 ```rust
-use catalyst_core::AgentEvent;
-use std::collections::HashMap;
-
-pub struct App {
-    pub messages: Vec<Message>,
-    pub input: String,
-    pub input_mode: InputMode,
-    pub cursor_position: usize,
-    pub scroll_offset: usize,
-    pub model: String,
-    pub tokens_used: u64,
-    pub cost: f64,
-    pub is_streaming: bool,
-    pub should_quit: bool,
-    pub pending_input: Option<String>,
+pub struct ProjectContext {
+    /// Absolute path to project root
+    root: PathBuf,
+    /// Detected primary language
+    language: ProjectLanguage,
+    /// Truncated file tree (top 3 levels + file counts per directory)
+    file_tree: String,
+    /// Git information (if available)
+    git: Option<GitContext>,
+    /// Key files detected by convention (Cargo.toml, package.json, etc.)
+    key_files: Vec<KeyFile>,
+    /// When this index was built
+    indexed_at: Instant,
 }
 
-pub enum InputMode {
-    Normal,
-    Insert,
+pub enum ProjectLanguage {
+    Rust,
+    TypeScript,
+    JavaScript,
+    Python,
+    Go,
+    Unknown,
 }
 
-pub enum Message {
-    User { content: String },
-    Assistant { content: String, thinking: Option<String> },
-    ToolCall { id: String, name: String, status: ToolStatus },
-    ToolResult { id: String, output: String, is_error: bool },
+pub struct GitContext {
+    pub branch: String,
+    pub modified_files: Vec<String>,
+    pub staged_files: Vec<String>,
+    pub recent_commits: Vec<CommitInfo>,
 }
 
-pub enum ToolStatus {
-    Pending,
-    Running,
-    Complete,
-    Failed,
+pub struct CommitInfo {
+    pub hash: String,     // short hash
+    pub message: String,  // first line only
+    pub age: String,      // "2 hours ago", "3 days ago"
 }
 
-impl App {
-    pub fn new(model: String) -> Self {
-        Self {
-            messages: Vec::new(),
-            input: String::new(),
-            input_mode: InputMode::Normal,
-            cursor_position: 0,
-            scroll_offset: 0,
-            model,
-            tokens_used: 0,
-            cost: 0.0,
-            is_streaming: false,
-            should_quit: false,
-            pending_input: None,
-        }
-    }
-    
-    pub fn handle_event(&mut self, event: AgentEvent) {
-        match event {
-            AgentEvent::TextDelta { text } => {
-                if let Some(Message::Assistant { content, .. }) = self.messages.last_mut() {
-                    content.push_str(&text);
-                } else {
-                    self.messages.push(Message::Assistant {
-                        content: text,
-                        thinking: None,
-                    });
-                }
-            }
-            AgentEvent::ThinkingDelta { thinking } => {
-                if let Some(Message::Assistant { thinking: t, .. }) = self.messages.last_mut() {
-                    t.get_or_insert_with(String::new).push_str(&thinking);
-                }
-            }
-            AgentEvent::ToolCall { id, name, .. } => {
-                self.messages.push(Message::ToolCall {
-                    id,
-                    name,
-                    status: ToolStatus::Running,
-                });
-            }
-            AgentEvent::ToolResult { id, result, is_error } => {
-                if let Some(Message::ToolCall { status, .. }) = self.messages.last_mut() {
-                    *status = if is_error { ToolStatus::Failed } else { ToolStatus::Complete };
-                }
-                self.messages.push(Message::ToolResult {
-                    id,
-                    output: result,
-                    is_error,
-                });
-            }
-            AgentEvent::Complete => {
-                self.is_streaming = false;
-            }
-            AgentEvent::Error(msg) => {
-                self.messages.push(Message::Assistant {
-                    content: format!("Error: {}", msg),
-                    thinking: None,
-                });
-                self.is_streaming = false;
-            }
-        }
-    }
+pub struct KeyFile {
+    pub path: String,
+    pub purpose: String,  // "package manifest", "entry point", etc.
 }
 ```
 
-### 5.2 UI Rendering
-
-**File:** `catalyst-tui/src/ui.rs`
+#### Startup Indexing
 
 ```rust
-use ratatui::{
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame,
-};
-use crate::app::{App, InputMode, Message};
-
-pub fn ui(frame: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(0),     // Messages
-            Constraint::Length(3),  // Input
-            Constraint::Length(1),  // Footer
-        ])
-        .split(frame.size());
-    
-    // Header
-    let header = Paragraph::new(format!(
-        "Catalyst | Model: {} | Tokens: {} | Cost: ${:.2}",
-        app.model,
-        app.tokens_used,
-        app.cost
-    ))
-    .block(Block::default().borders(Borders::BOTTOM));
-    frame.render_widget(header, chunks[0]);
-    
-    // Messages
-    let items: Vec<ListItem> = app.messages
-        .iter()
-        .map(|msg| match msg {
-            Message::User { content } => {
-                ListItem::new(Line::from(vec![
-                    Span::styled("You: ", Style::default().fg(Color::Cyan)),
-                    Span::raw(content),
-                ]))
-            }
-            Message::Assistant { content, thinking } => {
-                let mut lines = vec![Line::from(vec![
-                    Span::styled("Catalyst: ", Style::default().fg(Color::Green)),
-                    Span::raw(content),
-                ])];
-                
-                if let Some(t) = thinking {
-                    lines.push(Line::from(vec![
-                        Span::styled("Thinking: ", Style::default().fg(Color::Yellow)),
-                        Span::raw(t),
-                    ]));
-                }
-                
-                ListItem::new(lines)
-            }
-            Message::ToolCall { name, status, .. } => {
-                let status_text = match status {
-                    crate::app::ToolStatus::Running => "⟳",
-                    crate::app::ToolStatus::Complete => "✓",
-                    crate::app::ToolStatus::Failed => "✗",
-                    crate::app::ToolStatus::Pending => "⋯",
-                };
-                ListItem::new(Line::from(vec![
-                    Span::styled(status_text, Style::default().fg(Color::Blue)),
-                    Span::raw(" "),
-                    Span::styled(name, Style::default().fg(Color::Magenta)),
-                ]))
-            }
-            Message::ToolResult { output, is_error, .. } => {
-                let color = if *is_error { Color::Red } else { Color::Gray };
-                ListItem::new(Line::from(vec![
-                    Span::styled("  → ", Style::default().fg(color)),
-                    Span::styled(&output[..output.len().min(100)], Style::default().fg(color)),
-                ]))
-            }
+impl ProjectContext {
+    /// Build project index from working directory.
+    /// Called once on startup, takes <100ms for most projects.
+    pub fn index(working_dir: &Path) -> Result<Self> {
+        let language = Self::detect_language(working_dir);
+        let file_tree = Self::build_file_tree(working_dir, 3);
+        let git = Self::detect_git(working_dir);
+        let key_files = Self::find_key_files(working_dir, &language);
+        
+        Ok(Self {
+            root: working_dir.to_path_buf(),
+            language,
+            file_tree,
+            git,
+            key_files,
+            indexed_at: Instant::now(),
         })
-        .collect();
+    }
     
-    let messages = List::new(items)
-        .block(Block::default());
-    frame.render_widget(messages, chunks[1]);
+    fn detect_language(dir: &Path) -> ProjectLanguage {
+        // Check for Cargo.toml → Rust
+        // Check for package.json → TypeScript/JavaScript
+        // Check for requirements.txt / pyproject.toml → Python
+        // Check for go.mod → Go
+        // Default → Unknown
+    }
     
-    // Input
-    let input_style = match app.input_mode {
-        InputMode::Normal => Style::default(),
-        InputMode::Insert => Style::default().fg(Color::Yellow),
-    };
+    fn build_file_tree(dir: &Path, max_depth: usize) -> String {
+        // Walk directory up to max_depth
+        // Skip: target/, node_modules/, .git/, __pycache__/, dist/, build/
+        // Format:
+        //   src/
+        //   ├── cli/
+        //   │   ├── main.rs (232 lines)
+        //   │   └── config.rs (212 lines)
+        //   ├── core/
+        //   │   ├── agent.rs (533 lines)
+        //   │   └── ...
+        //   Cargo.toml
+        //   README.md
+    }
     
-    let input = Paragraph::new(app.input.as_str())
-        .style(input_style)
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .title(match app.input_mode {
-                InputMode::Normal => "Normal (i for insert)",
-                InputMode::Insert => "Insert (Esc for normal)",
-            }));
-    frame.render_widget(input, chunks[2]);
-    
-    // Footer
-    let footer = Paragraph::new("Ctrl+C: Quit | Enter: Send | /help: Commands")
-        .style(Style::default().fg(Color::DarkGray));
-    frame.render_widget(footer, chunks[3]);
+    fn detect_git(dir: &Path) -> Option<GitContext> {
+        // Run: git rev-parse --is-inside-work-tree
+        // Run: git branch --show-current
+        // Run: git status --porcelain
+        // Run: git log --oneline -5
+        // If any fail, return None (no git or git not installed)
+    }
 }
 ```
 
-### 5.3 Event Loop
-
-**File:** `catalyst-tui/src/lib.rs`
+#### System Prompt Injection
 
 ```rust
-mod app;
-mod ui;
-
-pub use app::*;
-pub use ui::*;
-
-use anyhow::Result;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{self, Stdout};
-use std::time::Duration;
-use tokio::sync::mpsc;
-
-pub type Result<T> = anyhow::Result<T>;
-
-pub struct TerminalGuard {
-    stdout: Stdout,
-}
-
-impl TerminalGuard {
-    pub fn new() -> Result<Self> {
-        let mut stdout = io::stdout();
-        enable_raw_mode()?;
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-        Ok(Self { stdout })
+impl Agent {
+    fn build_system_prompt(&self) -> String {
+        let mut prompt = self.base_system_prompt.clone();
+        
+        if self.config.project_awareness {
+            let project_context = self.project.to_prompt_text();
+            prompt.push_str(&format!("\n\n## Project Context\n\n{}", project_context));
+        }
+        
+        prompt
     }
 }
 
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = execute!(self.stdout, LeaveAlternateScreen, DisableMouseCapture);
-        let _ = disable_raw_mode();
-    }
-}
-
-pub async fn run_app(app: &mut App, mut rx: mpsc::UnboundedReceiver<catalyst_core::AgentEvent>) -> Result<()> {
-    let _guard = TerminalGuard::new()?;
-    
-    let backend = CrosstermBackend::new(io::stdout());
-    let mut terminal = Terminal::new(backend)?;
-    
-    loop {
-        // Poll for input
-        if event::poll(Duration::from_millis(16))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    handle_key(app, key);
-                }
-                _ => {}
+impl ProjectContext {
+    pub fn to_prompt_text(&self) -> String {
+        let mut text = String::new();
+        
+        // Language
+        text.push_str(&format!("Language: {}\n", self.language.display_name()));
+        
+        // File tree
+        text.push_str(&format!("\nFile structure:\n{}\n", self.file_tree));
+        
+        // Key files
+        if !self.key_files.is_empty() {
+            text.push_str("\nKey files:\n");
+            for f in &self.key_files {
+                text.push_str(&format!("- {} ({})\n", f.path, f.purpose));
             }
         }
         
-        // Poll for agent events
-        while let Ok(event) = rx.try_recv() {
-            app.handle_event(event);
-        }
-        
-        // Render
-        terminal.draw(|frame| ui(frame, app))?;
-        
-        if app.should_quit {
-            break;
-        }
-    }
-    
-    Ok(())
-}
-
-fn handle_key(app: &mut App, key: KeyEvent) {
-    match app.input_mode {
-        InputMode::Normal => {
-            match key.code {
-                KeyCode::Char('i') => {
-                    app.input_mode = InputMode::Insert;
+        // Git state
+        if let Some(git) = &self.git {
+            text.push_str(&format!("\nGit branch: {}\n", git.branch));
+            
+            if !git.modified_files.is_empty() {
+                text.push_str("Modified files:\n");
+                for f in &git.modified_files {
+                    text.push_str(&format!("- {}\n", f));
                 }
-                KeyCode::Char('q') | KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
-                    app.should_quit = true;
+            }
+            
+            if !git.recent_commits.is_empty() {
+                text.push_str("Recent commits:\n");
+                for c in &git.recent_commits {
+                    text.push_str(&format!("- {} {} ({})\n", c.hash, c.message, c.age));
                 }
-                _ => {}
             }
         }
-        InputMode::Insert => {
-            match key.code {
-                KeyCode::Esc => {
-                    app.input_mode = InputMode::Normal;
-                }
-                KeyCode::Enter => {
-                    if !app.input.is_empty() {
-                        app.pending_input = Some(app.input.clone());
-                        app.input.clear();
-                        app.cursor_position = 0;
-                        app.is_streaming = true;
-                    }
-                }
-                KeyCode::Char(c) => {
-                    // UTF-8 safe: use char indices, not byte indices
-                    let char_pos = app.input.chars().count();
-                    if app.cursor_position >= char_pos {
-                        app.input.push(c);
-                    } else {
-                        // Find byte position for character position
-                        let byte_pos = app.input
-                            .char_indices()
-                            .nth(app.cursor_position)
-                            .map(|(i, _)| i)
-                            .unwrap_or(app.input.len());
-                        app.input.insert(byte_pos, c);
-                    }
-                    app.cursor_position += 1;
-                }
-                KeyCode::Backspace => {
-                    if app.cursor_position > 0 {
-                        app.cursor_position -= 1;
-                        // UTF-8 safe: find byte position for character position
-                        let byte_pos = app.input
-                            .char_indices()
-                            .nth(app.cursor_position)
-                            .map(|(i, _)| i)
-                            .unwrap_or(app.input.len());
-                        app.input.remove(byte_pos);
-                    }
-                }
-                KeyCode::Left => {
-                    if app.cursor_position > 0 {
-                        app.cursor_position -= 1;
-                    }
-                }
-                KeyCode::Right => {
-                    let char_count = app.input.chars().count();
-                    if app.cursor_position < char_count {
-                        app.cursor_position += 1;
-                    }
-                }
-                _ => {}
-            }
-        }
+        
+        text
     }
 }
 ```
 
-**Deliverable:** Working TUI
+#### Cost Impact
+
+```
+Project context injection:
+  File tree (3 levels):    ~200-500 tokens (most projects)
+  Git status:              ~50-100 tokens
+  Key files:               ~50-100 tokens
+  ────────────────────────────────────────
+  Total overhead:          ~300-700 tokens per request
+  
+Cost per request (Sonnet 4 @ $3/M input):
+  500 tokens × $3/1M = $0.0015
+  
+Value: Agent avoids 2-3 exploratory tool calls per task
+  (each tool call = full request/response cycle = ~$0.02-0.05)
+  Net savings: ~$0.04-0.15 per task
+```
+
+**No new dependencies.** Uses `std::fs` for file tree, `std::process::Command` for git.
 
 ---
 
-## Phase 6: CLI Entry Point (Day 11)
+## Architecture Changes
 
-### 6.1 Main
+### Crate Structure (Unchanged: 5 Crates)
 
-**File:** `catalyst-cli/src/main.rs`
+```
+catalyst/
+├── catalyst-cli/           (entry point)
+│   ├── src/main.rs         (updated: project indexing on startup)
+│   └── src/config.rs       (updated: new config fields for agent limits)
+│
+├── catalyst-core/          (agent logic — restructured)
+│   ├── src/agent.rs        (agent state machine + execution loop)
+│   ├── src/context.rs      (NEW: context engine, token budgeting, file cache)
+│   ├── src/project.rs      (NEW: project indexing, git awareness)
+│   ├── src/event.rs        (agent events — extended with Cancelled)
+│   └── src/lib.rs          (re-exports)
+│
+├── catalyst-llm/           (LLM providers — minor updates)
+│   ├── src/anthropic.rs    (unchanged)
+│   ├── src/openrouter.rs   (unchanged)
+│   ├── src/provider.rs     (unchanged)
+│   ├── src/types.rs        (unchanged)
+│   ├── src/client.rs       (unchanged)
+│   └── src/lib.rs          (unchanged)
+│
+├── catalyst-tools/         (tools — expanded)
+│   ├── src/tools/
+│   │   ├── mod.rs          (tool re-exports)
+│   │   ├── read.rs         (extracted from tools.rs)
+│   │   ├── write.rs        (extracted from tools.rs)
+│   │   ├── edit.rs         (extracted from tools.rs)
+│   │   ├── bash.rs         (extracted from tools.rs)
+│   │   ├── glob.rs         (NEW: file pattern matching)
+│   │   ├── grep.rs         (NEW: content search)
+│   │   └── list.rs         (NEW: directory listing)
+│   ├── src/registry.rs     (updated: async execution)
+│   ├── src/lib.rs          (updated: async tool trait)
+│   └── src/context.rs      (unchanged)
+│
+└── catalyst-tui/           (TUI — minor updates)
+    ├── src/lib.rs          (updated: cancellation support)
+    ├── src/app.rs          (updated: AgentState display, cancel event)
+    ├── src/ui.rs           (updated: show iteration count, project info)
+    ├── src/command.rs      (unchanged)
+    ├── src/theme.rs        (unchanged)
+    └── src/lib.rs          (unchanged)
+```
+
+### Dependency Changes
+
+```toml
+# catalyst-core/Cargo.toml — additions
+[dependencies]
+tiktoken-rs = "0.6"         # Token counting for context budgeting
+tokio-util = "0.7"          # CancellationToken
+
+# catalyst-tools/Cargo.toml — additions
+[dependencies]
+glob = "0.3"                # File pattern matching
+regex = "1.10"              # Content search
+async-trait = "0.1"         # Async tool trait (moved from being internal)
+```
+
+### New Events
 
 ```rust
-use anyhow::Result;
-use catalyst_core::Agent;
-use catalyst_llm::AnthropicClient;
-use catalyst_tools::ToolRegistry;
-use catalyst_tui::{App, InputMode, run_app};
-use clap::Parser;
-use std::path::PathBuf;
-use tokio::sync::mpsc;
-
-#[derive(Parser)]
-#[command(name = "catalyst")]
-#[command(about = "A research-driven AI coding agent", long_about = None)]
-struct Cli {
-    /// Working directory
-    #[arg(short, long, default_value = ".")]
-    dir: PathBuf,
+// catalyst-core/src/event.rs — additions to AgentEvent
+pub enum AgentEvent {
+    // ... existing variants ...
     
-    /// Model to use
-    #[arg(short, long, default_value = "claude-sonnet-4-20250514")]
-    model: String,
+    /// Agent was cancelled by user
+    Cancelled,
     
-    /// API key (or set ANTHROPIC_API_KEY env var)
-    #[arg(long, env = "ANTHROPIC_API_KEY")]
-    api_key: String,
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    /// Agent state changed
+    StateChanged { from: AgentState, to: AgentState },
     
-    let cli = Cli::parse();
+    /// Context budget warning (approaching limit)
+    ContextBudgetWarning {
+        used: usize,
+        limit: usize,
+        percentage: f64,
+    },
     
-    let working_dir = cli.dir.canonicalize()?;
-    
-    // Create client
-    let client = AnthropicClient::new(cli.api_key, cli.model.clone());
-    
-    // Create tool registry
-    let tools = ToolRegistry::new();
-    
-    // Create agent
-    let agent = Agent::new(client, tools, working_dir);
-    
-    // Create app
-    let mut app = App::new(cli.model);
-    
-    // Create channel for agent events
-    let (tx, rx) = mpsc::unbounded_channel();
-    
-    // Spawn agent task
-    tokio::spawn(async move {
-        // Agent loop handles incoming user messages
-        // and sends events through tx
-    });
-    
-    // Run TUI
-    run_app(&mut app, rx).await?;
-    
-    Ok(())
+    /// Tool output was truncated
+    OutputTruncated {
+        original_len: usize,
+        truncated_len: usize,
+    },
 }
 ```
 
-**Deliverable:** Working CLI binary
-
 ---
 
-## Phase 7: Polish & Testing (Days 12-14)
+## Implementation Waves
 
-### 7.1 Add Slash Commands
+### Wave 1: Foundation (Week 1-2)
 
-- `/help` - Show help
-- `/model` - Change model
-- `/clear` - Clear messages
-- `/exit` - Exit
+Groundwork. Everything else depends on this.
 
-### 7.2 Error Handling
+| # | Task | File(s) | Effort | Dependencies |
+|---|---|---|---|---|
+| 1.1 | Async tool trait migration | `catalyst-tools/src/lib.rs` | 1 day | None |
+| 1.2 | Extract tools into separate files | `catalyst-tools/src/tools/*.rs` | 0.5 day | 1.1 |
+| 1.3 | Implement `glob` tool | `catalyst-tools/src/tools/glob.rs` | 1 day | 1.1 |
+| 1.4 | Implement `grep` tool | `catalyst-tools/src/tools/grep.rs` | 1 day | 1.1 |
+| 1.5 | Implement `list` tool | `catalyst-tools/src/tools/list.rs` | 0.5 day | 1.1 |
+| 1.6 | Tool output truncation | `catalyst-tools/src/lib.rs` | 0.5 day | 1.1 |
+| 1.7 | Update registry for async | `catalyst-tools/src/registry.rs` | 0.5 day | 1.1 |
+| 1.8 | Max iteration guard in agent | `catalyst-core/src/agent.rs` | 0.5 day | None |
+| 1.9 | CancellationToken integration | `catalyst-core/src/agent.rs` | 0.5 day | None |
+| 1.10 | Ctrl+C → cancel in TUI | `catalyst-tui/src/lib.rs` | 0.5 day | 1.9 |
+| 1.11 | Tests for new tools | `catalyst-tools/src/tools/*.rs` | 1 day | 1.3-1.5 |
 
-- Graceful API error handling
-- Retry logic for rate limits
-- User-friendly error messages
+**Wave 1 Deliverable:** 7 tools, async trait, iteration guard, cancellation.
 
-### 7.3 Testing
+### Wave 2: Context Engine (Week 3-4)
 
-```bash
-cargo test --workspace
-cargo clippy --all-targets -- -D warnings
-cargo fmt --check
-```
+The core differentiator.
 
-### 7.4 Documentation
+| # | Task | File(s) | Effort | Dependencies |
+|---|---|---|---|---|
+| 2.1 | Token counting module | `catalyst-core/src/context.rs` | 1 day | None |
+| 2.2 | TokenBudget struct + allocation | `catalyst-core/src/context.rs` | 0.5 day | 2.1 |
+| 2.3 | File content cache | `catalyst-core/src/context.rs` | 1 day | None |
+| 2.4 | Context message builder | `catalyst-core/src/context.rs` | 2 days | 2.1, 2.2 |
+| 2.5 | Sliding window + summarization stub | `catalyst-core/src/context.rs` | 2 days | 2.4 |
+| 2.6 | Integrate context engine into agent | `catalyst-core/src/agent.rs` | 1 day | 2.4 |
+| 2.7 | Context budget warnings | `catalyst-core/src/agent.rs` | 0.5 day | 2.6 |
+| 2.8 | Tests for context engine | `catalyst-core/src/context.rs` | 2 days | 2.6 |
 
-- README.md
-- USAGE.md
-- CONTRIBUTING.md
+**Wave 2 Deliverable:** Context engine that manages token budgets, caches files, and builds context-aware messages.
 
----
+### Wave 3: Project Awareness + Agent Intelligence (Week 5-6)
 
-## Build & Release
+| # | Task | File(s) | Effort | Dependencies |
+|---|---|---|---|---|
+| 3.1 | Language detection | `catalyst-core/src/project.rs` | 0.5 day | None |
+| 3.2 | File tree builder | `catalyst-core/src/project.rs` | 1 day | None |
+| 3.3 | Git context detection | `catalyst-core/src/project.rs` | 1 day | None |
+| 3.4 | Key file detection | `catalyst-core/src/project.rs` | 0.5 day | 3.1 |
+| 3.5 | Dynamic system prompt builder | `catalyst-core/src/agent.rs` | 1 day | 3.2, 3.3 |
+| 3.6 | Agent state machine | `catalyst-core/src/agent.rs` | 1 day | Wave 1 |
+| 3.7 | Error retry in agent loop | `catalyst-core/src/agent.rs` | 1 day | 3.6 |
+| 3.8 | Session persistence (save/resume) | `catalyst-core/src/session.rs` | 2 days | 2.6 |
+| 3.9 | @file reference syntax | `catalyst-core/src/agent.rs` | 1 day | 2.3 |
+| 3.10 | TUI updates (state display, project info) | `catalyst-tui/src/*.rs` | 1 day | 3.6 |
 
-### Development Build
+**Wave 3 Deliverable:** Project-aware agent with state machine, session persistence, and file references.
 
-```bash
-cargo build --workspace
-cargo run --package catalyst-cli
-```
+### Wave 4: Polish + Release (Week 7)
 
-### Release Build
-
-```bash
-cargo build --workspace --release
-```
-
-### Install Locally
-
-```bash
-cargo install --path catalyst-cli
-```
+| # | Task | File(s) | Effort | Dependencies |
+|---|---|---|---|---|
+| 4.1 | Integration tests | `tests/` | 2 days | All waves |
+| 4.2 | Config file updates (new fields) | `catalyst-cli/src/config.rs` | 0.5 day | Wave 3 |
+| 4.3 | README.md rewrite | `README.md` | 0.5 day | All waves |
+| 4.4 | USAGE.md update | `USAGE.md` | 0.5 day | All waves |
+| 4.5 | CHANGELOG.md update | `CHANGELOG.md` | 0.5 day | All waves |
+| 4.6 | Clippy + fmt pass | workspace | 0.5 day | All waves |
+| 4.7 | Version bump to 0.2.0 | `Cargo.toml` | 0.1 day | All tasks |
 
 ---
 
 ## Success Criteria
 
+> **v0.2.0 is done when: you can ask Catalyst "add error handling to all public functions in catalyst-tools" and it autonomously discovers the files, reads them, plans the changes, executes edits, and verifies the result — all without hitting token limits, losing context, or needing hand-holding.**
+
+### Specific Criteria
+
 | Criteria | Verification |
-|----------|-------------|
-| Compiles | `cargo build --workspace` succeeds |
-| Tests pass | `cargo test --workspace` succeeds |
-| Lints clean | `cargo clippy` no warnings |
-| TUI renders | Run `catalyst` and see interface |
-| Sends message | Type message, see response |
-| Uses tools | Ask to read a file, see tool call |
-| Streams | Response appears character by character |
+|---|---|
+| 7 tools working (4 existing + 3 new) | `cargo test --workspace` passes with new tool tests |
+| Async tool trait | All tools implement async `execute()` |
+| Max iteration guard | Agent stops after 25 tool calls, emits error |
+| Cancellation works | Ctrl+C during streaming stops agent cleanly |
+| Token counting | Context engine counts tokens accurately (±5%) |
+| Token budget enforced | Agent never exceeds configured context window |
+| File caching | Same file not sent twice in one session |
+| Output truncation | Tool results >10K chars truncated intelligently |
+| Project awareness | System prompt includes file tree, git status, language |
+| Session persistence | Can quit and resume a conversation |
+| @file references | `@src/main.rs` in message auto-injects file content |
+| 94+ tests passing | `cargo test --workspace` green |
+| Zero clippy warnings | `cargo clippy --all-targets -- -D warnings` clean |
+| Clean format | `cargo fmt --check` passes |
 
----
+### Performance Targets
 
-## Timeline
-
-| Day | Phase | Deliverable |
-|-----|-------|-------------|
-| 1 | Setup | Compiling workspace |
-| 2-3 | LLM Client | Streaming API working |
-| 4-5 | Tools | 4 tools working |
-| 6-7 | Core Agent | Agent processes messages |
-| 8-10 | TUI | Interactive interface |
-| 11 | CLI | Binary runs |
-| 12-14 | Polish | Ready for release |
-
----
-
----
-
-## Next Steps After MVP
-
-### ✅ Completed in v0.1.0-alpha
-1. ~~Multi-provider support~~ (Added OpenRouter)
-2. Basic TUI implementation
-3. 4 core tools (read, write, edit, bash)
-4. Slash commands
-5. Configuration system
-
-### 🎯 Next Release: v0.2.0-beta
-
----
-
-## v0.2.0-beta Release Requirements
-
-### Priority: Critical (Must Fix)
-
-#### Bugs & Issues
-1. **Error Handling Improvements**
-   - [ ] Replace all `unwrap()` in production code with proper error handling
-   - [ ] Add user-friendly error messages for common failures
-   - [ ] Improve error recovery in agent stream processing
-   - Files: `catalyst-cli/src/main.rs`, `catalyst-core/src/agent.rs`
-
-2. **Edge Cases**
-   - [ ] Handle empty messages gracefully
-   - [ ] Handle network timeouts and retries
-   - [ ] Handle malformed API responses
-   - [ ] Handle rate limiting with exponential backoff
-   - Files: `catalyst-llm/src/anthropic.rs`, `catalyst-llm/src/openrouter.rs`
-
-3. **Configuration**
-   - [ ] Add config file validation
-   - [ ] Handle missing/corrupted config files
-   - [ ] Add config migration for version updates
-   - Files: `catalyst-cli/src/config.rs`
-
-#### Security
-1. **API Key Security**
-   - [ ] Mask API keys in logs and error messages
-   - [ ] Secure storage of API keys (keyring integration)
-   - [ ] Environment variable sanitization
-   - Files: `catalyst-cli/src/main.rs`, `catalyst-tui/src/app.rs`
-
-2. **Command Execution**
-   - [ ] Expand dangerous command patterns list
-   - [ ] Add command timeout enforcement
-   - [ ] Add command whitelist/blacklist configuration
-   - Files: `catalyst-tools/src/tools.rs`
-
-### Priority: High (Should Have)
-
-#### Features
-1. **Session Persistence**
-   - [ ] Save conversation history to disk
-   - [ ] Load previous sessions
-   - [ ] Session management (list, delete, resume)
-   - [ ] Auto-save on exit
-   - New files: `catalyst-core/src/session.rs`, `catalyst-cli/src/session.rs`
-
-2. **File References**
-   - [ ] Support `@file` syntax in messages
-   - [ ] Auto-read referenced files
-   - [ ] Handle large files with streaming
-   - Files: `catalyst-core/src/agent.rs`, `catalyst-tui/src/app.rs`
-
-3. **Enhanced Tool System**
-   - [ ] Add `glob` tool for file pattern matching
-   - [ ] Add `grep` tool for content search
-   - [ ] Add `list` tool for directory listing
-   - [ ] Tool timeout configuration per tool
-   - Files: `catalyst-tools/src/tools.rs`, `catalyst-tools/src/registry.rs`
-
-4. **Streaming Improvements**
-   - [ ] Show typing indicators
-   - [ ] Cancel streaming responses
-   - [ ] Resume interrupted streams
-   - Files: `catalyst-core/src/agent.rs`, `catalyst-tui/src/lib.rs`
-
-#### Testing
-1. **Unit Tests**
-   - [ ] Add tests for LLM client error handling
-   - [ ] Add tests for tool execution edge cases
-   - [ ] Add tests for configuration loading/saving
-   - [ ] Add tests for session persistence
-   - Target: 80% code coverage
-
-2. **Integration Tests**
-   - [ ] End-to-end conversation flow tests
-   - [ ] Tool execution integration tests
-   - [ ] TUI interaction tests
-   - New directory: `tests/`
-
-3. **Performance Tests**
-   - [ ] Large file handling tests
-   - [ ] Long conversation tests
-   - [ ] Memory leak detection
-
-### Priority: Medium (Nice to Have)
-
-#### User Experience
-1. **TUI Enhancements**
-   - [ ] Add message search functionality
-   - [ ] Add message copy/paste
-   - [ ] Add conversation export (markdown, JSON)
-   - [ ] Add syntax highlighting for code blocks
-   - [ ] Add message timestamps
-   - Files: `catalyst-tui/src/ui.rs`, `catalyst-tui/src/app.rs`
-
-2. **Keyboard Shortcuts**
-   - [ ] Add vim-style navigation
-   - [ ] Add page up/down for message history
-   - [ ] Add keyboard shortcuts for common actions
-   - Files: `catalyst-tui/src/lib.rs`
-
-3. **Themes**
-   - [ ] Add multiple color themes
-   - [ ] Add custom theme support
-   - [ ] Add light/dark mode toggle
-   - Files: `catalyst-tui/src/theme.rs`
-
-#### Performance
-1. **Optimizations**
-   - [ ] Implement message pagination for long conversations
-   - [ ] Add caching for frequently accessed files
-   - [ ] Optimize TUI rendering for large outputs
-   - Files: `catalyst-tui/src/app.rs`, `catalyst-tui/src/ui.rs`
-
-2. **Memory Management**
-   - [ ] Limit conversation history size
-   - [ ] Implement message pruning strategies
-   - [ ] Add memory usage monitoring
-
-#### Documentation
-1. **User Documentation**
-   - [ ] Add troubleshooting guide
-   - [ ] Add FAQ section
-   - [ ] Add video tutorials
-   - [ ] Add example configurations
-   - Files: `USAGE.md`, `docs/`
-
-2. **Developer Documentation**
-   - [ ] Add architecture diagrams
-   - [ ] Add API documentation
-   - [ ] Add contribution workflow diagrams
-   - Files: `CONTRIBUTING.md`, `docs/architecture.md`
-
-### Priority: Low (Future Consideration)
-
-#### Advanced Features
-1. **Multi-file Operations**
-   - [ ] Batch file operations
-   - [ ] File watching and auto-reload
-   - [ ] Directory tree visualization
-
-2. **Code Analysis**
-   - [ ] AST parsing for better code understanding
-   - [ ] Symbol navigation
-   - [ ] Code completion suggestions
-
-3. **Integrations**
-   - [ ] Git integration (commit, diff, blame)
-   - [ ] IDE integration (LSP support)
-   - [ ] CI/CD integration
-
-4. **Advanced AI Features**
-   - [ ] Multi-turn context management
-   - [ ] Code explanation mode
-   - [ ] Refactoring suggestions
-   - [ ] Test generation
-
----
-
-## Release Checklist v0.2.0-beta
-
-### Pre-Release
-- [ ] All critical bugs fixed
-- [ ] All high-priority features implemented
-- [ ] All tests passing
-- [ ] Zero clippy warnings
-- [ ] Code coverage > 70%
-- [ ] Documentation updated
-- [ ] CHANGELOG.md created
-- [ ] Migration guide from v0.1.0 created
-
-### Testing
-- [ ] Manual testing on macOS
-- [ ] Manual testing on Linux
-- [ ] Manual testing on Windows
-- [ ] Performance benchmarks
-- [ ] Memory leak testing
-- [ ] Edge case testing
-
-### Documentation
-- [ ] README.md updated
-- [ ] USAGE.md updated
-- [ ] CONTRIBUTING.md updated
-- [ ] API documentation complete
-- [ ] Examples added
-
-### Release
-- [ ] Version bumped in Cargo.toml
-- [ ] Git tag created (v0.2.0-beta)
-- [ ] GitHub release published
-- [ ] Release notes written
-- [ ] Binaries built for all platforms
-- [ ] Homebrew formula updated (optional)
-- [ ] Announcement posted
-
----
-
-## Known Issues (v0.1.0-alpha)
-
-### Critical
-- None identified
-
-### High
-1. **API Error Handling**: Some API errors may cause panics instead of graceful degradation
-2. **Large Files**: No streaming for very large file reads (>100MB)
-3. **Network Issues**: No retry logic for transient network failures
-
-### Medium
-1. **Message History**: No pagination for very long conversations
-2. **Syntax Highlighting**: Code blocks don't have syntax highlighting
-3. **Session Persistence**: Conversations lost on exit
-4. **File References**: No `@file` syntax support
-
-### Low
-1. **Themes**: Only one color theme available
-2. **Export**: No conversation export functionality
-3. **Search**: No message search functionality
-
----
-
-## Technical Debt
-
-### Code Quality
-1. **Error Types**: Create custom error types instead of using `anyhow::Error` everywhere
-2. **Logging**: Add structured logging with levels
-3. **Metrics**: Add performance metrics collection
-4. **Tracing**: Add distributed tracing support
-
-### Architecture
-1. **Modularity**: Better separation of concerns in agent module
-2. **Testing**: More comprehensive test coverage
-3. **Documentation**: More inline code documentation
-4. **Type Safety**: Use newtypes for IDs and strong types
-
-### Dependencies
-1. **Audit**: Run `cargo audit` regularly
-2. **Updates**: Keep dependencies up to date
-3. **Minimization**: Remove unused dependencies
-
----
-
-## Success Metrics for v0.2.0-beta
-
-### Quality
-- [ ] Zero critical bugs
-- [ ] < 5 high-priority bugs
-- [ ] Test coverage > 70%
-- [ ] All clippy warnings resolved
-- [ ] Zero security vulnerabilities
-
-### Performance
-- [ ] Startup time < 100ms
-- [ ] Message send latency < 50ms
-- [ ] Memory usage < 100MB idle
-- [ ] Smooth 60fps UI rendering
-
-### User Experience
-- [ ] Error messages are helpful
-- [ ] No unexpected crashes
-- [ ] Intuitive keyboard navigation
-- [ ] Clear documentation
-
----
-
-## Timeline Estimate
-
-| Phase | Duration | Tasks |
-|-------|----------|-------|
-| Bug Fixes | 1-2 weeks | Critical and high priority bugs |
-| Session Persistence | 1 week | Save/load conversations |
-| File References | 3-5 days | @file syntax support |
-| Enhanced Tools | 1 week | glob, grep, list tools |
-| Testing | 1 week | Comprehensive test suite |
-| Documentation | 3-5 days | Update all docs |
-| Polish | 3-5 days | UI improvements, performance |
-| **Total** | **5-7 weeks** | **v0.2.0-beta release** |
+| Metric | Target | Why |
+|---|---|---|
+| Startup time | < 200ms | Project indexing must be fast |
+| Context build time | < 50ms | Per-request overhead |
+| Token counting overhead | < 10ms per message | Must not slow streaming |
+| Memory idle | < 50MB | Rust advantage over Python/TS agents |
 
 ---
 
 ## Future Roadmap
 
-### v0.3.0
-- TLA+ verification integration
-- Simulation engine
-- Advanced code analysis
+### v0.3.0 — Codebase Intelligence (Q3 2026)
 
-### v0.4.0
-- IDE integration (LSP)
-- Git integration
-- Multi-file operations
+Builds on v0.2.0's context engine:
+- Tree-sitter indexing for semantic code understanding
+- Symbol navigation (go to definition, find references)
+- Dependency graph awareness
+- Context-aware code suggestions based on call graph
 
-### v1.0.0
-- Production-ready release
-- Complete feature set
-- Extensive testing
-- Full documentation
-- Multiple platform support
+**Why it depends on v0.2:** You can't build semantic search without a context management system. The context engine from v0.2.0 becomes the foundation for storing and retrieving tree-sitter indices.
+
+### v0.4.0 — Verification Layer (Q4 2026)
+
+Builds on v0.3.0's codebase intelligence:
+- Behavioral testing (auto-generate tests for changes)
+- Invariant checking (detect violated assumptions)
+- Lightweight formal verification (TLA-lite for concurrent code)
+- Change impact analysis (what does this edit affect?)
+
+**Why it depends on v0.3:** You can't verify code without understanding its structure. Tree-sitter from v0.3 provides the AST needed for verification.
+
+### v1.0.0 — Production Catalyst (Q1 2027)
+
+- Extension/plugin system
+- Multi-agent orchestration (planner + coder + reviewer)
+- Team features (shared context, rules)
+- Platform binaries (macOS, Linux, Windows)
+- Homebrew/cargo install
+
+---
+
+## Technical Debt Addressed
+
+| Item | v0.1.1 State | v0.2.0 Fix |
+|---|---|---|
+| Tool trait is sync | Blocking in async context | Async trait |
+| No token counting | Guess at context size | tiktoken-rs counting |
+| Unbounded recursion | Can loop forever | Iteration guard |
+| No cancellation | Must wait for completion | CancellationToken |
+| Static system prompt | Same text every request | Dynamic with project context |
+| All files re-read | Content duplicated in messages | File cache |
+| Large tool outputs | Full content sent to LLM | Smart truncation |
+| `client.rs` dead code | Legacy SseStream unused | Remove in v0.2 |
+
+---
+
+## Release Checklist
+
+### Pre-Release
+- [ ] All Wave 1-4 tasks complete
+- [ ] All success criteria verified
+- [ ] `cargo test --workspace` green
+- [ ] `cargo clippy` clean
+- [ ] `cargo fmt` clean
+- [ ] No new `unwrap()` in production code
+- [ ] API keys never logged
+
+### Testing
+- [ ] Manual test: multi-file edit task end-to-end
+- [ ] Manual test: cancellation during streaming
+- [ ] Manual test: session save/resume
+- [ ] Manual test: context budget enforcement
+- [ ] Manual test: all 7 tools
+- [ ] Manual test: project awareness on Rust project
+- [ ] Manual test: project awareness on non-git directory
+
+### Documentation
+- [ ] README.md rewritten for v0.2.0 positioning
+- [ ] USAGE.md updated with new tools and features
+- [ ] CHANGELOG.md entry for v0.2.0
+- [ ] CONTRIBUTING.md updated
+
+### Release
+- [ ] Version bumped to 0.2.0 in all Cargo.toml files
+- [ ] Git tag `v0.2.0` created
+- [ ] GitHub release published with notes
+- [ ] Binaries built for macOS (aarch64 + x86_64) and Linux (x86_64)

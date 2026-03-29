@@ -1,5 +1,30 @@
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentState {
+    Idle,
+    Planning,
+    Executing { iteration: usize },
+    Verifying,
+    Complete,
+    Error(String),
+    Cancelled,
+}
+
+impl std::fmt::Display for AgentState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentState::Idle => write!(f, "Idle"),
+            AgentState::Planning => write!(f, "Planning"),
+            AgentState::Executing { iteration } => write!(f, "Executing (iteration {})", iteration),
+            AgentState::Verifying => write!(f, "Verifying"),
+            AgentState::Complete => write!(f, "Complete"),
+            AgentState::Error(msg) => write!(f, "Error: {}", msg),
+            AgentState::Cancelled => write!(f, "Cancelled"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     TextDelta {
@@ -22,6 +47,11 @@ pub enum AgentEvent {
         input: u64,
         output: u64,
     },
+    StateChanged {
+        from: String,
+        to: String,
+    },
+    Cancelled,
     Complete,
     Error(String),
 }

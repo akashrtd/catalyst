@@ -107,8 +107,8 @@ pub mod mock {
         #[tokio::test]
         async fn test_mock_provider() {
             let provider = MockProvider::with_text_response("test-model", "Hello, world!");
-            let stream = provider.stream(None, vec![], vec![]).await.unwrap();
-            
+            let _stream = provider.stream(None, vec![], vec![]).await.unwrap();
+
             assert_eq!(provider.name(), "mock");
             assert_eq!(provider.model(), "test-model");
         }

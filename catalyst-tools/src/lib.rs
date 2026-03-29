@@ -35,13 +35,44 @@ impl ToolResult {
             metadata: HashMap::new(),
         }
     }
+
+    pub fn truncate_for_context(&self, max_chars: usize) -> String {
+        if self.output.len() <= max_chars {
+            return self.output.clone();
+        }
+
+        let head_chars = max_chars / 3;
+        let tail_chars = max_chars / 3;
+
+        let head: String = self.output.chars().take(head_chars).collect();
+        let tail: String = self
+            .output
+            .chars()
+            .rev()
+            .take(tail_chars)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        let omitted = self.output.len() - head_chars - tail_chars;
+
+        format!(
+            "{}\n\n... [truncated: {} characters omitted] ...\n\n{}",
+            head, omitted, tail
+        )
+    }
 }
 
+#[async_trait::async_trait]
 pub trait Tool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
-    fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult>;
+    async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult>;
+
+    fn output_limit(&self) -> usize {
+        10_000
+    }
 
     fn clone_box(&self) -> Box<dyn Tool>;
 }
@@ -63,22 +94,25 @@ mod tests {
         (ctx, temp_dir)
     }
 
-    #[test]
-    fn test_read_tool() {
+    #[tokio::test]
+    async fn test_read_tool() {
         let (ctx, _temp) = create_test_context();
         let test_file = ctx.working_dir.join("test.txt");
         fs::write(&test_file, "line1\nline2\nline3").unwrap();
 
         let tool = ReadTool;
-        let result = tool.execute(json!({"path": "test.txt"}), &ctx).unwrap();
+        let result = tool
+            .execute(json!({"path": "test.txt"}), &ctx)
+            .await
+            .unwrap();
 
         assert!(result.output.contains("line1"));
         assert!(result.output.contains("line2"));
         assert!(result.output.contains("line3"));
     }
 
-    #[test]
-    fn test_read_tool_with_offset() {
+    #[tokio::test]
+    async fn test_read_tool_with_offset() {
         let (ctx, _temp) = create_test_context();
         let test_file = ctx.working_dir.join("test.txt");
         fs::write(&test_file, "line1\nline2\nline3").unwrap();
@@ -86,6 +120,7 @@ mod tests {
         let tool = ReadTool;
         let result = tool
             .execute(json!({"path": "test.txt", "offset": 2}), &ctx)
+            .await
             .unwrap();
 
         assert!(!result.output.contains("line1"));
@@ -93,13 +128,14 @@ mod tests {
         assert!(result.output.contains("line3"));
     }
 
-    #[test]
-    fn test_write_tool() {
+    #[tokio::test]
+    async fn test_write_tool() {
         let (ctx, _temp) = create_test_context();
         let tool = WriteTool;
 
         let result = tool
             .execute(json!({"path": "new.txt", "content": "hello world"}), &ctx)
+            .await
             .unwrap();
 
         assert!(result.output.contains("File created"));
@@ -109,23 +145,25 @@ mod tests {
         assert_eq!(content, "hello world");
     }
 
-    #[test]
-    fn test_write_tool_fails_on_existing() {
+    #[tokio::test]
+    async fn test_write_tool_fails_on_existing() {
         let (ctx, _temp) = create_test_context();
         let test_file = ctx.working_dir.join("existing.txt");
         fs::write(&test_file, "old content").unwrap();
 
         let tool = WriteTool;
-        let result = tool.execute(
-            json!({"path": "existing.txt", "content": "new content"}),
-            &ctx,
-        );
+        let result = tool
+            .execute(
+                json!({"path": "existing.txt", "content": "new content"}),
+                &ctx,
+            )
+            .await;
 
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_edit_tool() {
+    #[tokio::test]
+    async fn test_edit_tool() {
         let (ctx, _temp) = create_test_context();
         let test_file = ctx.working_dir.join("test.txt");
         fs::write(&test_file, "hello world").unwrap();
@@ -136,6 +174,7 @@ mod tests {
                 json!({"path": "test.txt", "old_string": "world", "new_string": "rust"}),
                 &ctx,
             )
+            .await
             .unwrap();
 
         assert!(result.output.contains("Replaced 1 occurrence"));
@@ -144,46 +183,52 @@ mod tests {
         assert_eq!(content, "hello rust");
     }
 
-    #[test]
-    fn test_edit_tool_multiple_occurrences() {
+    #[tokio::test]
+    async fn test_edit_tool_multiple_occurrences() {
         let (ctx, _temp) = create_test_context();
         let test_file = ctx.working_dir.join("test.txt");
         fs::write(&test_file, "foo foo foo").unwrap();
 
         let tool = EditTool;
-        let result = tool.execute(
-            json!({"path": "test.txt", "old_string": "foo", "new_string": "bar"}),
-            &ctx,
-        );
+        let result = tool
+            .execute(
+                json!({"path": "test.txt", "old_string": "foo", "new_string": "bar"}),
+                &ctx,
+            )
+            .await;
 
         assert!(result.is_err());
 
-        let _result = tool.execute(
-            json!({"path": "test.txt", "old_string": "foo", "new_string": "bar", "replace_all": true}),
-            &ctx,
-        ).unwrap();
+        let _result = tool
+            .execute(
+                json!({"path": "test.txt", "old_string": "foo", "new_string": "bar", "replace_all": true}),
+                &ctx,
+            )
+            .await
+            .unwrap();
 
         let content = fs::read_to_string(test_file).unwrap();
         assert_eq!(content, "bar bar bar");
     }
 
-    #[test]
-    fn test_bash_tool_simple_command() {
+    #[tokio::test]
+    async fn test_bash_tool_simple_command() {
         let (ctx, _temp) = create_test_context();
         let tool = BashTool;
 
         let result = tool
             .execute(json!({"command": "echo hello"}), &ctx)
+            .await
             .unwrap();
         assert!(result.output.contains("hello"));
     }
 
-    #[test]
-    fn test_bash_tool_blocks_dangerous_commands() {
+    #[tokio::test]
+    async fn test_bash_tool_blocks_dangerous_commands() {
         let (ctx, _temp) = create_test_context();
         let tool = BashTool;
 
-        let result = tool.execute(json!({"command": "rm -rf /"}), &ctx);
+        let result = tool.execute(json!({"command": "rm -rf /"}), &ctx).await;
         assert!(result.is_err());
     }
 
@@ -195,6 +240,9 @@ mod tests {
         assert!(registry.get("write").is_some());
         assert!(registry.get("edit").is_some());
         assert!(registry.get("bash").is_some());
+        assert!(registry.get("glob").is_some());
+        assert!(registry.get("grep").is_some());
+        assert!(registry.get("list").is_some());
         assert!(registry.get("nonexistent").is_none());
     }
 
@@ -203,7 +251,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let tools = registry.to_anthropic_tools();
 
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 7);
 
         let names: Vec<&str> = tools
             .iter()
@@ -214,5 +262,44 @@ mod tests {
         assert!(names.contains(&"write"));
         assert!(names.contains(&"edit"));
         assert!(names.contains(&"bash"));
+        assert!(names.contains(&"glob"));
+        assert!(names.contains(&"grep"));
+        assert!(names.contains(&"list"));
+    }
+
+    #[test]
+    fn test_tool_result_truncate_no_truncation_needed() {
+        let result = ToolResult::success("hello world");
+        assert_eq!(result.truncate_for_context(100), "hello world");
+    }
+
+    #[test]
+    fn test_tool_result_truncate_large_output() {
+        let content = "a".repeat(30_000);
+        let result = ToolResult::success(&content);
+        let truncated = result.truncate_for_context(9_000);
+
+        assert!(truncated.len() < content.len());
+        assert!(truncated.contains("[truncated:"));
+        assert!(truncated.starts_with('a'));
+        assert!(truncated.ends_with('a'));
+    }
+
+    #[test]
+    fn test_tool_result_truncate_preserves_head_and_tail() {
+        let content = format!("{}MIDDLE{}", "H".repeat(5000), "T".repeat(5000));
+        let result = ToolResult::success(&content);
+        let truncated = result.truncate_for_context(3000);
+
+        let head_size = 3000 / 3;
+        assert!(truncated.starts_with(&"H".repeat(head_size)));
+        assert!(truncated.ends_with(&"T".repeat(head_size)));
+        assert!(truncated.contains("characters omitted"));
+    }
+
+    #[test]
+    fn test_tool_default_output_limit() {
+        let tool = ReadTool;
+        assert_eq!(tool.output_limit(), 10_000);
     }
 }
