@@ -47,6 +47,7 @@ pub async fn run_app(
     mut rx: mpsc::UnboundedReceiver<AgentEvent>,
     tx: mpsc::UnboundedSender<String>,
     api_key_tx: mpsc::UnboundedSender<(String, String)>,
+    cancel_tx: mpsc::UnboundedSender<()>,
 ) -> Result<()> {
     let _guard = TerminalGuard::new()?;
 
@@ -63,6 +64,9 @@ pub async fn run_app(
                     }
                     HandleResult::UpdateApiKey { provider, api_key } => {
                         let _ = api_key_tx.send((provider, api_key));
+                    }
+                    HandleResult::Cancel => {
+                        let _ = cancel_tx.send(());
                     }
                     HandleResult::Continue => {}
                 }
@@ -88,6 +92,7 @@ pub enum HandleResult {
     Quit,
     SendMessage(String),
     UpdateApiKey { provider: String, api_key: String },
+    Cancel,
 }
 
 fn handle_key(app: &mut App, key: KeyEvent) -> HandleResult {
@@ -123,6 +128,14 @@ fn handle_key(app: &mut App, key: KeyEvent) -> HandleResult {
             KeyCode::Esc => {
                 app.input_mode = InputMode::Normal;
                 HandleResult::Continue
+            }
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
+                if app.is_streaming {
+                    HandleResult::Cancel
+                } else {
+                    app.should_quit = true;
+                    HandleResult::Quit
+                }
             }
             KeyCode::Enter => {
                 if !app.input.is_empty() {

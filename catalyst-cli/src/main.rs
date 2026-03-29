@@ -127,6 +127,7 @@ async fn main() -> Result<()> {
     let (agent_tx, agent_rx) = mpsc::unbounded_channel();
     let (input_tx, mut input_rx) = mpsc::unbounded_channel::<String>();
     let (api_key_tx, mut api_key_rx) = mpsc::unbounded_channel::<(String, String)>();
+    let (cancel_tx, mut cancel_rx) = mpsc::unbounded_channel::<()>();
 
     let agent: Arc<Mutex<Option<Agent>>> = Arc::new(Mutex::new(None));
     let state_clone = state.clone();
@@ -171,12 +172,18 @@ async fn main() -> Result<()> {
                     let mut agent_guard = agent_clone.lock().await;
                     *agent_guard = None;
                 }
+                Some(()) = cancel_rx.recv() => {
+                    let agent_guard = agent_clone.lock().await;
+                    if let Some(ref agent_instance) = *agent_guard {
+                        agent_instance.cancel();
+                    }
+                }
                 else => break,
             }
         }
     });
 
-    run_app(&mut app, agent_rx, input_tx, api_key_tx).await?;
+    run_app(&mut app, agent_rx, input_tx, api_key_tx, cancel_tx).await?;
 
     Ok(())
 }
@@ -203,7 +210,13 @@ mod tests {
 
     #[test]
     fn test_cli_with_options() {
-        let cli = Cli::try_parse_from(["catalyst", "--model", "claude-3-opus", "--provider", "anthropic"]);
+        let cli = Cli::try_parse_from([
+            "catalyst",
+            "--model",
+            "claude-3-opus",
+            "--provider",
+            "anthropic",
+        ]);
         assert!(cli.is_ok());
         let cli = cli.unwrap();
         assert_eq!(cli.model, Some("claude-3-opus".to_string()));

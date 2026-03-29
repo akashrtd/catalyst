@@ -1,4 +1,4 @@
-use crate::{AgentEvent, AgentState};
+use crate::{AgentEvent, AgentState, ContextEngine};
 use anyhow::Result;
 use catalyst_llm::{Content, ContentBlock, LlmProvider, Message, Role, StreamEvent};
 use catalyst_tools::{ToolContext, ToolRegistry};
@@ -33,6 +33,7 @@ pub struct Agent {
     config: AgentConfig,
     state: AgentState,
     cancelled: Arc<AtomicBool>,
+    context_engine: ContextEngine,
 }
 
 impl Agent {
@@ -41,6 +42,7 @@ impl Agent {
         tools: ToolRegistry,
         working_dir: std::path::PathBuf,
     ) -> Self {
+        let model = provider.model().to_string();
         Self {
             provider,
             tools,
@@ -50,6 +52,7 @@ impl Agent {
             config: AgentConfig::default(),
             state: AgentState::Idle,
             cancelled: Arc::new(AtomicBool::new(false)),
+            context_engine: ContextEngine::new(&model),
         }
     }
 
@@ -84,6 +87,14 @@ impl Agent {
         self.system_prompt = prompt;
     }
 
+    pub fn context_engine(&self) -> &ContextEngine {
+        &self.context_engine
+    }
+
+    pub fn context_engine_mut(&mut self) -> &mut ContextEngine {
+        &mut self.context_engine
+    }
+
     pub async fn send(
         &mut self,
         user_message: String,
@@ -114,13 +125,13 @@ impl Agent {
 
         let anthropic_tools = self.tools.to_anthropic_tools();
 
+        let context_messages = self
+            .context_engine
+            .build_messages(&self.messages, &self.system_prompt);
+
         let mut stream = self
             .provider
-            .stream(
-                Some(&self.system_prompt),
-                self.messages.clone(),
-                anthropic_tools,
-            )
+            .stream(Some(&self.system_prompt), context_messages, anthropic_tools)
             .await?;
 
         let mut assistant_content: Vec<ContentBlock> = Vec::new();
