@@ -16,6 +16,18 @@ pub struct Config {
     pub system_prompt: Option<String>,
     #[serde(default)]
     pub working_dir: Option<PathBuf>,
+    #[serde(default = "default_max_iterations")]
+    pub max_iterations: usize,
+    #[serde(default = "default_max_retries")]
+    pub max_retries: usize,
+    #[serde(default = "default_auto_retry")]
+    pub auto_retry: bool,
+    #[serde(default = "default_project_awareness")]
+    pub project_awareness: bool,
+    #[serde(default = "default_working_window_size")]
+    pub working_window_size: usize,
+    #[serde(default = "default_max_tokens_per_request")]
+    pub max_tokens_per_request: usize,
 }
 
 fn default_model() -> String {
@@ -24,6 +36,30 @@ fn default_model() -> String {
 
 fn default_max_tokens() -> u32 {
     4096
+}
+
+fn default_max_iterations() -> usize {
+    25
+}
+
+fn default_max_retries() -> usize {
+    2
+}
+
+fn default_auto_retry() -> bool {
+    true
+}
+
+fn default_project_awareness() -> bool {
+    true
+}
+
+fn default_working_window_size() -> usize {
+    10
+}
+
+fn default_max_tokens_per_request() -> usize {
+    200_000
 }
 
 impl Default for Config {
@@ -35,6 +71,12 @@ impl Default for Config {
             max_tokens: default_max_tokens(),
             system_prompt: None,
             working_dir: None,
+            max_iterations: default_max_iterations(),
+            max_retries: default_max_retries(),
+            auto_retry: default_auto_retry(),
+            project_awareness: default_project_awareness(),
+            working_window_size: default_working_window_size(),
+            max_tokens_per_request: default_max_tokens_per_request(),
         }
     }
 }
@@ -106,6 +148,12 @@ mod tests {
         assert!(config.provider.is_none());
         assert!(config.system_prompt.is_none());
         assert!(config.working_dir.is_none());
+        assert_eq!(config.max_iterations, 25);
+        assert_eq!(config.max_retries, 2);
+        assert!(config.auto_retry);
+        assert!(config.project_awareness);
+        assert_eq!(config.working_window_size, 10);
+        assert_eq!(config.max_tokens_per_request, 200_000);
     }
 
     #[test]
@@ -117,6 +165,7 @@ mod tests {
             max_tokens: 8192,
             system_prompt: Some("Be helpful".to_string()),
             working_dir: Some(PathBuf::from("/tmp")),
+            ..Default::default()
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();

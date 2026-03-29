@@ -220,6 +220,7 @@ impl App {
             }
             AgentEvent::Complete => {
                 self.is_streaming = false;
+                self.status_message = "Ready".to_string();
             }
             AgentEvent::TokenUsage { input, output } => {
                 self.input_tokens += input;

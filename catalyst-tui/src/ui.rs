@@ -58,7 +58,10 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
                     .fg(Theme::CYAN)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" Processing...", Style::default().fg(Theme::CYAN)),
+            Span::styled(
+                format!(" {}", app.status_message),
+                Style::default().fg(Theme::CYAN),
+            ),
         ]
     } else {
         vec![]

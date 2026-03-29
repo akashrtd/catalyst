@@ -4,6 +4,8 @@ use catalyst_llm::{Content, ContentBlock, LlmProvider, Message, Role, StreamEven
 use catalyst_tools::{ToolContext, ToolRegistry};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 pub struct AgentConfig {
@@ -30,6 +32,7 @@ pub struct Agent {
     working_dir: std::path::PathBuf,
     config: AgentConfig,
     state: AgentState,
+    cancelled: Arc<AtomicBool>,
 }
 
 impl Agent {
@@ -46,11 +49,28 @@ impl Agent {
             working_dir,
             config: AgentConfig::default(),
             state: AgentState::Idle,
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn state(&self) -> &AgentState {
         &self.state
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    fn check_cancelled(&self, tx: &mpsc::UnboundedSender<AgentEvent>) -> bool {
+        if self.is_cancelled() {
+            let _ = tx.send(AgentEvent::Cancelled);
+            return true;
+        }
+        false
     }
 
     fn transition(&mut self, new_state: AgentState, tx: &mpsc::UnboundedSender<AgentEvent>) {
@@ -69,6 +89,7 @@ impl Agent {
         user_message: String,
         tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<()> {
+        self.cancelled.store(false, Ordering::SeqCst);
         self.transition(AgentState::Planning, &tx);
 
         self.messages.push(Message {
@@ -84,6 +105,11 @@ impl Agent {
         tx: mpsc::UnboundedSender<AgentEvent>,
         iteration: usize,
     ) -> Result<()> {
+        if self.check_cancelled(&tx) {
+            self.state = AgentState::Cancelled;
+            return Ok(());
+        }
+
         self.transition(AgentState::Executing { iteration }, &tx);
 
         let anthropic_tools = self.tools.to_anthropic_tools();
@@ -217,6 +243,11 @@ impl Agent {
                                 "Max iterations ({}) reached. Stopping to prevent runaway.",
                                 self.config.max_iterations
                             )));
+                            return Ok(());
+                        }
+
+                        if self.check_cancelled(&tx) {
+                            self.state = AgentState::Cancelled;
                             return Ok(());
                         }
 
