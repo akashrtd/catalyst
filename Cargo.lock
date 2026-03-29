@@ -183,6 +183,7 @@ dependencies = [
  "catalyst-tools",
  "dirs",
  "futures",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",

@@ -7,9 +7,12 @@ A research-driven AI coding agent with a beautiful terminal user interface.
 - **Multi-Provider Support**: Works with Anthropic Claude and OpenRouter
 - **Terminal UI**: Beautiful, responsive interface built with ratatui
 - **Streaming Responses**: Real-time streaming of AI responses with extended thinking
-- **Tool System**: Built-in tools for reading, writing, editing files and executing commands
-- **Slash Commands**: Quick commands for model switching, clearing history, and more
-- **Safe Execution**: Path validation and dangerous command blocking
+- **Rich Tool System**: 7 built-in tools — read, write, edit, bash, glob, grep, list
+- **Context Engine**: Token budgeting, sliding window, file caching, output truncation
+- **Project Awareness**: Auto-detects language, file tree, git context, key files
+- **@file References**: Use `@path/to/file` in messages to inject file contents
+- **Session Persistence**: Save and resume conversations with `/sessions`
+- **Cancellation**: Ctrl+C during streaming cancels, during idle quits
 - **Configurable**: TOML-based configuration with CLI overrides
 
 ## Installation
@@ -95,7 +98,7 @@ Inside the TUI, use these commands:
 
 ## Tools
 
-Catalyst has 4 built-in tools:
+Catalyst has 7 built-in tools:
 
 1. **read** - Read file contents with line numbers
    - Parameters: `path`, `offset` (optional), `limit` (optional)
@@ -108,6 +111,15 @@ Catalyst has 4 built-in tools:
 
 4. **bash** - Execute shell commands safely
    - Parameters: `command`, `timeout` (optional)
+
+5. **glob** - Find files matching a pattern
+   - Parameters: `pattern`, `max_results` (optional)
+
+6. **grep** - Search file contents with regex
+   - Parameters: `pattern`, `include` (optional)
+
+7. **list** - List directory contents with metadata
+   - Parameters: `path`
 
 ## Configuration
 

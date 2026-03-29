@@ -191,7 +191,7 @@ impl Summary {
 
 pub struct ContextEngine {
     max_context: usize,
-    _working_window_size: usize,
+    working_window_size: usize,
     file_cache: FileCache,
     archive: Vec<Summary>,
 }
@@ -206,10 +206,18 @@ impl ContextEngine {
 
         Self {
             max_context,
-            _working_window_size: max_context * 3 / 5,
+            working_window_size: max_context * 3 / 5,
             file_cache: FileCache::new(50),
             archive: Vec::new(),
         }
+    }
+
+    pub fn working_window_size(&self) -> usize {
+        self.working_window_size
+    }
+
+    pub fn set_working_window_size(&mut self, size: usize) {
+        self.working_window_size = size;
     }
 
     pub fn build_messages(
@@ -228,7 +236,32 @@ impl ContextEngine {
         let mut result = Vec::new();
         let mut tokens_used = 0;
 
-        // Walk messages from newest to oldest, fitting within budget
+        if !self.archive.is_empty() {
+            let archive_text: String = self
+                .archive
+                .iter()
+                .map(|s| s.to_text())
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            let archive_tokens = TokenCounter::count(&archive_text);
+            if archive_tokens < budget {
+                tokens_used += archive_tokens;
+                result.push(catalyst_llm::Message {
+                    role: catalyst_llm::Role::User,
+                    content: catalyst_llm::Content::Text(format!(
+                        "[Conversation Summary]\n{}",
+                        archive_text
+                    )),
+                });
+                result.push(catalyst_llm::Message {
+                    role: catalyst_llm::Role::Assistant,
+                    content: catalyst_llm::Content::Text(
+                        "Understood, I have the conversation context.".to_string(),
+                    ),
+                });
+            }
+        }
+
         for msg in messages.iter().rev() {
             let msg_tokens = TokenCounter::count_messages(std::slice::from_ref(msg));
             if tokens_used + msg_tokens > budget {
@@ -238,10 +271,83 @@ impl ContextEngine {
             result.push(msg.clone());
         }
 
-        // Reverse to restore chronological order
         result.reverse();
 
         self.truncate_tool_results(result, budget.saturating_sub(tokens_used))
+    }
+
+    pub fn summarize_messages(
+        &mut self,
+        messages: &[catalyst_llm::Message],
+        keep_recent: usize,
+    ) -> Vec<catalyst_llm::Message> {
+        if messages.len() <= keep_recent {
+            return messages.to_vec();
+        }
+
+        let split_point = messages.len() - keep_recent;
+        let older = &messages[..split_point];
+
+        let mut topics = Vec::new();
+        let mut actions = Vec::new();
+        let mut outcomes = Vec::new();
+
+        for msg in older {
+            match &msg.content {
+                catalyst_llm::Content::Text(t) => {
+                    let preview: String = t.chars().take(100).collect();
+                    match msg.role {
+                        catalyst_llm::Role::User => {
+                            if !preview.is_empty() {
+                                topics.push(preview);
+                            }
+                        }
+                        catalyst_llm::Role::Assistant => {
+                            if !preview.is_empty() {
+                                outcomes.push(preview);
+                            }
+                        }
+                    }
+                }
+                catalyst_llm::Content::Blocks(blocks) => {
+                    for block in blocks {
+                        match block {
+                            catalyst_llm::ContentBlock::ToolUse { name, .. } => {
+                                actions.push(format!("used {}", name));
+                            }
+                            catalyst_llm::ContentBlock::ToolResult {
+                                is_error: true,
+                                content,
+                                ..
+                            } => {
+                                outcomes.push(format!(
+                                    "error: {}",
+                                    content.chars().take(50).collect::<String>()
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        let topic = topics
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "general discussion".to_string());
+        self.archive.push(Summary {
+            topic,
+            actions: actions.into_iter().take(5).collect(),
+            outcomes: outcomes.into_iter().take(5).collect(),
+            token_count: 0,
+        });
+
+        if let Some(last) = self.archive.last_mut() {
+            last.token_count = TokenCounter::count(&last.to_text());
+        }
+
+        messages[split_point..].to_vec()
     }
 
     pub fn would_overflow(

@@ -7,17 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-29
+
 ### Added
-- Session persistence (planned for v0.2.0)
-- File references with @file syntax (planned for v0.2.0)
-- Enhanced tool system with glob, grep, list (planned for v0.2.0)
+
+#### Context Engine
+- **TokenCounter**: cl100k_base tokenizer for accurate token counting
+- **TokenBudget**: per-model budget tracking (200k Claude, 128k GPT-4o)
+- **FileCache**: LRU file cache with mtime validation and token counting
+- **ContextEngine**: sliding window message builder with archive summaries
+- **Budget warnings**: emits warning when context usage exceeds 80%
+- **Output truncation**: head/tail preservation with omitted char count
+
+#### Rich Tool System
+- **GlobTool**: file pattern matching with mtime sorting and max results
+- **GrepTool**: regex search with include filter, skips build directories
+- **ListTool**: directory listing with human sizes, skip hidden/build dirs
+- **Async tool trait**: all tools use async execute with output_limit()
+- **Output truncation**: automatic truncation for large tool results
+- **7 tools total**: read, write, edit, bash, glob, grep, list
+
+#### Agent Intelligence
+- **Max iteration guard**: stops at 25 iterations to prevent runaway
+- **AgentState machine**: Idle/Planning/Executing/Verifying/Complete/Error/Cancelled
+- **Error retry**: auto-retry on tool errors (configurable, default 2 retries)
+- **CancellationToken**: Ctrl+C during streaming cancels, idle quits
+- **State events**: StateChanged events for TUI status display
+
+#### Project Awareness
+- **Language detection**: Rust/TypeScript/JavaScript/Python/Go
+- **File tree builder**: tree chars, depth/line limits, skip hidden/build
+- **Git context detection**: branch, status, recent commits
+- **Key file detection**: language-specific (Cargo.toml, tsconfig, go.mod, etc.)
+- **Dynamic system prompt**: injects project context into system prompt
+
+#### Session Persistence
+- **SessionData**: save/load conversation history to JSON
+- **Session directory**: ~/.config/catalyst/sessions/<id>.json
+- **Session commands**: /sessions list, /session resume <id>, /session new
+
+#### @file Reference Syntax
+- **File expansion**: @path/to/file in messages auto-injects file content
+- **File caching**: referenced files cached in ContextEngine
+- **Truncation**: large files truncated with head/tail preservation
 
 ### Changed
-- Improved error handling (planned for v0.2.0)
-- Better API key security (planned for v0.2.0)
 
-### Fixed
-- Various bug fixes and improvements (planned for v0.2.0)
+#### Configuration
+- Added: max_iterations, max_retries, auto_retry, project_awareness
+- Added: working_window_size, max_tokens_per_request to config
+
+#### TUI
+- Status message display from agent state changes
+- Ctrl+C cancellation during streaming vs idle
+- Budget warning indicator in header
+- Session management commands
+
+### Technical Details
+
+#### Test Coverage by Crate
+- `catalyst-cli`: 15 tests
+- `catalyst-core`: 97 tests (agent, context, events, project, session)
+- `catalyst-llm`: 10 tests
+- `catalyst-tools`: 35 tests (7 tools + registry)
+- `catalyst-tui`: 44 tests (app, commands, key handling)
+- **201 total tests** (up from 94 in v0.1.1)
+
+#### New Dependencies
+- tiktoken-rs 0.9 — token counting
+- regex 1.11 — @file reference parsing
+- dirs 6.0 — session directory resolution
 
 ## [0.1.1] - 2026-03-18
 

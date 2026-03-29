@@ -23,6 +23,97 @@ impl ProjectLanguage {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct KeyFile {
+    pub path: String,
+    pub purpose: String,
+}
+
+pub fn detect_key_files(dir: &Path, language: &ProjectLanguage) -> Vec<KeyFile> {
+    let mut files = Vec::new();
+
+    let universal = [
+        ("README.md", "Project documentation"),
+        ("README.txt", "Project documentation"),
+        ("LICENSE", "License file"),
+        ("LICENSE.md", "License file"),
+        (".gitignore", "Git ignore rules"),
+        (".env.example", "Environment variable template"),
+        ("Makefile", "Build automation"),
+        ("Dockerfile", "Container build config"),
+        ("docker-compose.yml", "Container orchestration"),
+    ];
+
+    for (name, purpose) in &universal {
+        if dir.join(name).exists() {
+            files.push(KeyFile {
+                path: name.to_string(),
+                purpose: purpose.to_string(),
+            });
+        }
+    }
+
+    let language_specific: Vec<(&str, &str)> = match language {
+        ProjectLanguage::Rust => vec![
+            ("Cargo.toml", "Workspace/package manifest"),
+            ("Cargo.lock", "Dependency lockfile"),
+            ("src/lib.rs", "Library entry point"),
+            ("src/main.rs", "Binary entry point"),
+            ("tests/", "Integration tests"),
+            ("benches/", "Benchmarks"),
+            ("clippy.toml", "Clippy configuration"),
+            ("rustfmt.toml", "Formatter configuration"),
+        ],
+        ProjectLanguage::TypeScript | ProjectLanguage::JavaScript => vec![
+            ("package.json", "Package manifest"),
+            ("package-lock.json", "Dependency lockfile"),
+            ("tsconfig.json", "TypeScript configuration"),
+            ("src/index.ts", "Library entry point"),
+            ("src/index.tsx", "Library entry point"),
+            ("src/index.js", "Library entry point"),
+            ("src/main.ts", "Application entry point"),
+            ("next.config.js", "Next.js configuration"),
+            ("vite.config.ts", "Vite configuration"),
+            (".eslintrc.js", "Linter configuration"),
+        ],
+        ProjectLanguage::Python => vec![
+            ("pyproject.toml", "Project configuration"),
+            ("setup.py", "Package setup"),
+            ("requirements.txt", "Dependencies"),
+            ("src/__init__.py", "Package marker"),
+            ("tests/", "Test directory"),
+            ("tox.ini", "Test automation"),
+            ("pytest.ini", "Pytest configuration"),
+        ],
+        ProjectLanguage::Go => vec![
+            ("go.mod", "Module definition"),
+            ("go.sum", "Dependency checksums"),
+            ("main.go", "Application entry point"),
+            ("cmd/", "Command binaries"),
+            ("internal/", "Internal packages"),
+        ],
+        ProjectLanguage::Unknown => vec![],
+    };
+
+    for (name, purpose) in &language_specific {
+        if name.ends_with('/') {
+            if dir.join(name).is_dir() {
+                files.push(KeyFile {
+                    path: name.to_string(),
+                    purpose: purpose.to_string(),
+                });
+            }
+        } else if dir.join(name).exists() {
+            files.push(KeyFile {
+                path: name.to_string(),
+                purpose: purpose.to_string(),
+            });
+        }
+    }
+
+    files
+}
+
 pub fn detect_language(dir: &Path) -> ProjectLanguage {
     if dir.join("Cargo.toml").exists() {
         return ProjectLanguage::Rust;
@@ -325,5 +416,55 @@ mod tests {
     fn test_git_context_no_git() {
         let dir = TempDir::new().unwrap();
         assert!(detect_git_context(dir.path()).is_none());
+    }
+
+    #[test]
+    fn test_key_files_rust() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        fs::write(dir.path().join("README.md"), "# Test").unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        fs::write(dir.path().join("src/lib.rs"), "").unwrap();
+
+        let files = detect_key_files(dir.path(), &ProjectLanguage::Rust);
+        assert!(files.iter().any(|f| f.path == "Cargo.toml"));
+        assert!(files.iter().any(|f| f.path == "README.md"));
+        assert!(files.iter().any(|f| f.path == "src/lib.rs"));
+    }
+
+    #[test]
+    fn test_key_files_typescript() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("package.json"), "").unwrap();
+        fs::write(dir.path().join("tsconfig.json"), "").unwrap();
+
+        let files = detect_key_files(dir.path(), &ProjectLanguage::TypeScript);
+        assert!(files.iter().any(|f| f.path == "package.json"));
+        assert!(files.iter().any(|f| f.path == "tsconfig.json"));
+    }
+
+    #[test]
+    fn test_key_files_missing_files() {
+        let dir = TempDir::new().unwrap();
+        let files = detect_key_files(dir.path(), &ProjectLanguage::Rust);
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_key_files_unknown_language() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("README.md"), "").unwrap();
+        let files = detect_key_files(dir.path(), &ProjectLanguage::Unknown);
+        assert!(files.iter().any(|f| f.path == "README.md"));
+        assert!(!files.iter().any(|f| f.path == "Cargo.toml"));
+    }
+
+    #[test]
+    fn test_key_files_purpose() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "").unwrap();
+        let files = detect_key_files(dir.path(), &ProjectLanguage::Rust);
+        let cargo = files.iter().find(|f| f.path == "Cargo.toml").unwrap();
+        assert!(cargo.purpose.contains("manifest"));
     }
 }

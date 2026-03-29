@@ -87,6 +87,47 @@ impl Agent {
         self.system_prompt = prompt;
     }
 
+    pub fn build_dynamic_prompt(&self) -> String {
+        use crate::{build_file_tree, detect_git_context, detect_key_files, detect_language};
+
+        let mut parts = vec![DEFAULT_SYSTEM_PROMPT.to_string()];
+
+        let lang = detect_language(&self.working_dir);
+        parts.push(format!("\nProject Language: {}", lang.display_name()));
+
+        let tree = build_file_tree(&self.working_dir, 3, 50);
+        if !tree.is_empty() {
+            parts.push(format!("\nFile Tree:\n{}", tree));
+        }
+
+        let key_files = detect_key_files(&self.working_dir, &lang);
+        if !key_files.is_empty() {
+            let file_list: Vec<String> = key_files
+                .iter()
+                .map(|f| format!("  {} - {}", f.path, f.purpose))
+                .collect();
+            parts.push(format!("\nKey Files:\n{}", file_list.join("\n")));
+        }
+
+        if let Some(git) = detect_git_context(&self.working_dir) {
+            parts.push(format!("\nGit Branch: {}", git.branch));
+            if !git.modified_files.is_empty() {
+                parts.push(format!("Modified: {}", git.modified_files.join(", ")));
+            }
+            if !git.recent_commits.is_empty() {
+                let commits: Vec<String> = git
+                    .recent_commits
+                    .iter()
+                    .take(3)
+                    .map(|c| format!("  {} {}", c.hash, c.message))
+                    .collect();
+                parts.push(format!("Recent Commits:\n{}", commits.join("\n")));
+            }
+        }
+
+        parts.join("\n")
+    }
+
     pub fn context_engine(&self) -> &ContextEngine {
         &self.context_engine
     }
@@ -103,12 +144,54 @@ impl Agent {
         self.cancelled.store(false, Ordering::SeqCst);
         self.transition(AgentState::Planning, &tx);
 
+        let expanded = self.expand_file_references(&user_message);
+
         self.messages.push(Message {
             role: Role::User,
-            content: Content::Text(user_message),
+            content: Content::Text(expanded),
         });
 
         self.process_stream(tx, 0).await
+    }
+
+    fn expand_file_references(&mut self, input: &str) -> String {
+        let re = regex::Regex::new(r"@(\S+)").unwrap();
+        let mut result = input.to_string();
+
+        for cap in re.captures_iter(input) {
+            let file_path = &cap[1];
+            let full_path = self.working_dir.join(file_path);
+
+            if let Ok(content) = std::fs::read_to_string(&full_path) {
+                let replacement = format!(
+                    "[File: {}]\n{}\n[/File]",
+                    file_path,
+                    if content.len() > 10000 {
+                        format!(
+                            "{}\n\n... [truncated: {} chars] ...\n{}",
+                            &content[..content.len() / 3],
+                            content.len() * 2 / 3,
+                            &content[content.len() * 2 / 3..]
+                        )
+                    } else {
+                        content
+                    }
+                );
+                result = result.replace(&format!("@{}", file_path), &replacement);
+
+                if let Ok(metadata) = std::fs::metadata(&full_path) {
+                    if let Ok(modified) = metadata.modified() {
+                        self.context_engine.file_cache().insert(
+                            full_path.as_path(),
+                            replacement.clone(),
+                            modified,
+                        );
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     async fn process_stream(
@@ -632,5 +715,147 @@ mod tests {
 
         agent.send("Second".to_string(), tx).await.unwrap();
         assert_eq!(agent.messages.len(), 2);
+    }
+
+    #[test]
+    fn test_agent_cancel_flag() {
+        let events = vec![StreamEvent::MessageStop];
+        let agent = create_test_agent(events);
+        assert!(!agent.is_cancelled());
+        agent.cancel();
+        assert!(agent.is_cancelled());
+    }
+
+    #[test]
+    fn test_agent_check_cancelled_sends_event() {
+        let events = vec![StreamEvent::MessageStop];
+        let agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        assert!(!agent.check_cancelled(&tx));
+        assert!(rx.try_recv().is_err());
+
+        let agent2 = create_test_agent(vec![StreamEvent::MessageStop]);
+        agent2.cancel();
+        assert!(agent2.check_cancelled(&tx));
+
+        let event = rx.try_recv().unwrap();
+        assert!(matches!(event, AgentEvent::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn test_agent_max_iterations() {
+        let tool_call_events = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::ToolUse {
+                    id: "tool_1".to_string(),
+                    name: "bash".to_string(),
+                    input: serde_json::json!({"command": "echo hi"}),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageStop,
+        ];
+
+        let mut agent = create_test_agent(tool_call_events);
+        agent.config.max_iterations = 2;
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        agent.send("Test".to_string(), tx).await.unwrap();
+
+        let mut got_max_iter_error = false;
+        while let Ok(event) = rx.try_recv() {
+            if let AgentEvent::Error(msg) = &event {
+                if msg.contains("Max iterations") {
+                    got_max_iter_error = true;
+                }
+            }
+        }
+        assert!(got_max_iter_error);
+    }
+
+    #[tokio::test]
+    async fn test_agent_state_transitions() {
+        let events = vec![
+            StreamEvent::ContentBlockStart {
+                index: 0,
+                content_block: ContentBlock::Text {
+                    text: "Hello".to_string(),
+                },
+            },
+            StreamEvent::ContentBlockStop { index: 0 },
+            StreamEvent::MessageStop,
+        ];
+
+        let mut agent = create_test_agent(events);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        assert!(matches!(agent.state(), AgentState::Idle));
+
+        agent.send("Test".to_string(), tx).await.unwrap();
+
+        let mut states: Vec<String> = Vec::new();
+        while let Ok(event) = rx.try_recv() {
+            if let AgentEvent::StateChanged { to, .. } = &event {
+                states.push(to.clone());
+            }
+        }
+        assert!(states.contains(&"Planning".to_string()));
+        assert!(states.contains(&"Complete".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_agent_dynamic_prompt() {
+        let events = vec![StreamEvent::MessageStop];
+        let agent = create_test_agent(events);
+
+        let prompt = agent.build_dynamic_prompt();
+        assert!(prompt.contains("You are Catalyst"));
+    }
+
+    #[test]
+    fn test_agent_file_reference_expansion() {
+        let events = vec![StreamEvent::MessageStop];
+        let mut agent = create_test_agent(events);
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let test_file = tmp_dir.path().join("test.rs");
+        std::fs::write(&test_file, "fn main() {}").unwrap();
+
+        agent.working_dir = tmp_dir.path().to_path_buf();
+
+        let expanded = agent.expand_file_references("read @test.rs please");
+        assert!(expanded.contains("[File: test.rs]"));
+        assert!(expanded.contains("fn main() {}"));
+        assert!(expanded.contains("[/File]"));
+        assert!(!expanded.contains("@test.rs"));
+    }
+
+    #[test]
+    fn test_agent_file_reference_nonexistent() {
+        let events = vec![StreamEvent::MessageStop];
+        let mut agent = create_test_agent(events);
+        agent.working_dir = std::env::temp_dir();
+
+        let expanded = agent.expand_file_references("read @nonexistent_file.xyz please");
+        assert_eq!(expanded, "read @nonexistent_file.xyz please");
+    }
+
+    #[test]
+    fn test_agent_file_reference_multiple() {
+        let events = vec![StreamEvent::MessageStop];
+        let mut agent = create_test_agent(events);
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        std::fs::write(tmp_dir.path().join("a.rs"), "fn a() {}").unwrap();
+        std::fs::write(tmp_dir.path().join("b.rs"), "fn b() {}").unwrap();
+        agent.working_dir = tmp_dir.path().to_path_buf();
+
+        let expanded = agent.expand_file_references("compare @a.rs and @b.rs");
+        assert!(expanded.contains("[File: a.rs]"));
+        assert!(expanded.contains("[File: b.rs]"));
+        assert!(expanded.contains("fn a()"));
+        assert!(expanded.contains("fn b()"));
     }
 }
