@@ -51,6 +51,14 @@ pub enum AgentEvent {
         from: String,
         to: String,
     },
+    ContextBudgetWarning {
+        usage_percent: f64,
+    },
+    OutputTruncated {
+        tool_name: String,
+        original_len: usize,
+        truncated_len: usize,
+    },
     Cancelled,
     Complete,
     Error(String),
@@ -146,6 +154,42 @@ mod tests {
 
         match event {
             AgentEvent::Complete => (),
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_context_budget_warning_event() {
+        let event = AgentEvent::ContextBudgetWarning {
+            usage_percent: 85.5,
+        };
+
+        match event {
+            AgentEvent::ContextBudgetWarning { usage_percent } => {
+                assert!((usage_percent - 85.5).abs() < 0.01);
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[test]
+    fn test_output_truncated_event() {
+        let event = AgentEvent::OutputTruncated {
+            tool_name: "bash".to_string(),
+            original_len: 10000,
+            truncated_len: 5000,
+        };
+
+        match event {
+            AgentEvent::OutputTruncated {
+                tool_name,
+                original_len,
+                truncated_len,
+            } => {
+                assert_eq!(tool_name, "bash");
+                assert_eq!(original_len, 10000);
+                assert_eq!(truncated_len, 5000);
+            }
             _ => panic!("Wrong event type"),
         }
     }

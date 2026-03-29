@@ -105,6 +105,15 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     ];
     header_spans.extend(streaming_indicator);
 
+    if let Some(usage_pct) = app.budget_warning {
+        header_spans.push(Span::styled(
+            format!(" ⚠ {:.0}%", usage_pct),
+            Style::default()
+                .fg(Theme::AMBER)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     let header = Paragraph::new(Line::from(header_spans));
     frame.render_widget(header, inner);
 }

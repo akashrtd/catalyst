@@ -5,6 +5,9 @@ pub enum Command {
     Clear,
     Exit,
     Config,
+    Sessions,
+    SessionResume { id: String },
+    SessionNew,
     Unknown(String),
 }
 
@@ -28,19 +31,35 @@ impl Command {
             "clear" | "c" => Command::Clear,
             "exit" | "quit" | "q" => Command::Exit,
             "config" | "cfg" => Command::Config,
+            "sessions" | "ss" => Command::Sessions,
+            "session" => {
+                let subcmd = parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+                let sub_parts: Vec<&str> = subcmd.splitn(2, ' ').collect();
+                match sub_parts.first().copied() {
+                    Some("resume" | "r") => {
+                        let id = sub_parts.get(1).map(|s| s.to_string()).unwrap_or_default();
+                        Command::SessionResume { id }
+                    }
+                    Some("new" | "n") => Command::SessionNew,
+                    _ => Command::Unknown(format!("session {}", subcmd)),
+                }
+            }
             _ => Command::Unknown(input.to_string()),
         })
     }
 
     pub fn help_text() -> Vec<String> {
         vec![
-            "┌─ Commands ─────────────────────────────┐".to_string(),
-            "│ /help, /h, /?     Show this help      │".to_string(),
-            "│ /model, /m <name> Switch model        │".to_string(),
-            "│ /clear, /c        Clear conversation  │".to_string(),
-            "│ /config, /cfg     Show config         │".to_string(),
-            "│ /exit, /quit, /q  Exit Catalyst       │".to_string(),
-            "└────────────────────────────────────────┘".to_string(),
+            "┌─ Commands ──────────────────────────────────────┐".to_string(),
+            "│ /help, /h, /?         Show this help           │".to_string(),
+            "│ /model, /m <name>     Switch model             │".to_string(),
+            "│ /clear, /c            Clear conversation       │".to_string(),
+            "│ /config, /cfg         Show config              │".to_string(),
+            "│ /sessions, /ss        List saved sessions      │".to_string(),
+            "│ /session resume <id>  Resume a session         │".to_string(),
+            "│ /session new          Start new session        │".to_string(),
+            "│ /exit, /quit, /q      Exit Catalyst            │".to_string(),
+            "└─────────────────────────────────────────────────┘".to_string(),
         ]
     }
 }

@@ -194,6 +194,91 @@ fn handle_key(app: &mut App, key: KeyEvent) -> HandleResult {
                                     SystemLevel::Info,
                                 );
                             }
+                            Command::Sessions => match catalyst_core::list_sessions() {
+                                Ok(sessions) => {
+                                    if sessions.is_empty() {
+                                        app.add_system_message(
+                                            "No saved sessions.".to_string(),
+                                            SystemLevel::Info,
+                                        );
+                                    } else {
+                                        app.add_system_message(
+                                            "Saved sessions:".to_string(),
+                                            SystemLevel::Info,
+                                        );
+                                        for s in &sessions {
+                                            app.add_system_message(
+                                                format!(
+                                                    "  {} | {} msgs | {}",
+                                                    s.id,
+                                                    s.user_message_count(),
+                                                    s.preview()
+                                                ),
+                                                SystemLevel::Info,
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    app.add_system_message(
+                                        format!("Error listing sessions: {}", e),
+                                        SystemLevel::Error,
+                                    );
+                                }
+                            },
+                            Command::SessionResume { id } => {
+                                if id.is_empty() {
+                                    app.add_system_message(
+                                        "Usage: /session resume <id>".to_string(),
+                                        SystemLevel::Warning,
+                                    );
+                                } else {
+                                    match catalyst_core::load_session(&id) {
+                                        Ok(session) => {
+                                            app.clear_conversation();
+                                            for msg in &session.messages {
+                                                if let catalyst_llm::Content::Text(t) = &msg.content
+                                                {
+                                                    match msg.role {
+                                                        catalyst_llm::Role::User => {
+                                                            app.messages.push(Message::User {
+                                                                content: t.clone(),
+                                                            });
+                                                        }
+                                                        catalyst_llm::Role::Assistant => {
+                                                            app.messages.push(Message::Assistant {
+                                                                content: t.clone(),
+                                                                thinking: None,
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            app.add_system_message(
+                                                format!(
+                                                    "Resumed session {} ({} messages)",
+                                                    id,
+                                                    session.message_count()
+                                                ),
+                                                SystemLevel::Info,
+                                            );
+                                        }
+                                        Err(e) => {
+                                            app.add_system_message(
+                                                format!("Failed to load session: {}", e),
+                                                SystemLevel::Error,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Command::SessionNew => {
+                                app.clear_conversation();
+                                app.add_system_message(
+                                    "New session started.".to_string(),
+                                    SystemLevel::Info,
+                                );
+                            }
                             Command::Unknown(s) => {
                                 app.add_system_message(
                                     format!("Unknown command: /{}. Type /help for commands.", s),

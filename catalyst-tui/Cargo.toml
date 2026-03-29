@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 catalyst-core.workspace = true
+catalyst-llm.workspace = true
 
 tokio.workspace = true
 ratatui.workspace = true

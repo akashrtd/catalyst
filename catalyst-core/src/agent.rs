@@ -1,4 +1,4 @@
-use crate::{AgentEvent, AgentState, ContextEngine};
+use crate::{AgentEvent, AgentState, ContextEngine, TokenCounter};
 use anyhow::Result;
 use catalyst_llm::{Content, ContentBlock, LlmProvider, Message, Role, StreamEvent};
 use catalyst_tools::{ToolContext, ToolRegistry};
@@ -128,6 +128,16 @@ impl Agent {
         let context_messages = self
             .context_engine
             .build_messages(&self.messages, &self.system_prompt);
+
+        let total_tokens = TokenCounter::count_messages(&context_messages)
+            + TokenCounter::count(&self.system_prompt);
+        let budget_capacity = self.context_engine.max_context();
+        if budget_capacity > 0 {
+            let usage_percent = (total_tokens as f64 / budget_capacity as f64) * 100.0;
+            if usage_percent > 80.0 {
+                let _ = tx.send(AgentEvent::ContextBudgetWarning { usage_percent });
+            }
+        }
 
         let mut stream = self
             .provider

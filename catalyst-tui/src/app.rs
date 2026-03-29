@@ -81,6 +81,7 @@ pub struct App {
     pub last_update: Instant,
     pub popup: PopupState,
     pub status_message: String,
+    pub budget_warning: Option<f64>,
 }
 
 impl App {
@@ -104,6 +105,7 @@ impl App {
             last_update: Instant::now(),
             popup: PopupState::None,
             status_message: "Ready".to_string(),
+            budget_warning: None,
         }
     }
 
@@ -221,6 +223,7 @@ impl App {
             AgentEvent::Complete => {
                 self.is_streaming = false;
                 self.status_message = "Ready".to_string();
+                self.budget_warning = None;
             }
             AgentEvent::TokenUsage { input, output } => {
                 self.input_tokens += input;
@@ -239,6 +242,26 @@ impl App {
             }
             AgentEvent::StateChanged { to, .. } => {
                 self.status_message = to;
+            }
+            AgentEvent::ContextBudgetWarning { usage_percent } => {
+                self.budget_warning = Some(usage_percent);
+                self.add_system_message(
+                    format!("Context budget: {:.0}% used", usage_percent),
+                    SystemLevel::Warning,
+                );
+            }
+            AgentEvent::OutputTruncated {
+                tool_name,
+                original_len,
+                truncated_len,
+            } => {
+                self.add_system_message(
+                    format!(
+                        "{} output truncated: {} → {} chars",
+                        tool_name, original_len, truncated_len
+                    ),
+                    SystemLevel::Warning,
+                );
             }
             AgentEvent::Cancelled => {
                 self.is_streaming = false;

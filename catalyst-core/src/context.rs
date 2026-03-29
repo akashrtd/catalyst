@@ -351,6 +351,10 @@ impl ContextEngine {
     pub fn file_cache(&mut self) -> &mut FileCache {
         &mut self.file_cache
     }
+
+    pub fn max_context(&self) -> usize {
+        self.max_context
+    }
 }
 
 #[cfg(test)]
@@ -573,5 +577,322 @@ mod tests {
         );
         assert_eq!(engine.archive_summaries().len(), 1);
         assert!(engine.archive_token_count() > 0);
+    }
+
+    #[test]
+    fn test_context_engine_gpt4o_limit() {
+        let engine = ContextEngine::new("openai/gpt-4o");
+        assert_eq!(engine.max_context(), 128_000);
+    }
+
+    #[test]
+    fn test_token_counter_multibyte() {
+        let text = "こんにちは世界";
+        let count = TokenCounter::count(text);
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_token_counter_json() {
+        let json = r#"{"key": "value", "number": 42, "array": [1, 2, 3]}"#;
+        let count = TokenCounter::count(json);
+        assert!(count > 5);
+    }
+
+    #[test]
+    fn test_token_counter_single_char() {
+        assert_eq!(TokenCounter::count("a"), 1);
+    }
+
+    #[test]
+    fn test_token_counter_messages_with_text() {
+        let messages = vec![catalyst_llm::Message {
+            role: catalyst_llm::Role::User,
+            content: catalyst_llm::Content::Text("Hello, how are you?".to_string()),
+        }];
+        let count = TokenCounter::count_messages(&messages);
+        assert!(count > 0);
+        assert!(count < 20);
+    }
+
+    #[test]
+    fn test_token_counter_messages_with_blocks() {
+        let messages = vec![catalyst_llm::Message {
+            role: catalyst_llm::Role::Assistant,
+            content: catalyst_llm::Content::Blocks(vec![
+                catalyst_llm::ContentBlock::Text {
+                    text: "Reading file...".to_string(),
+                },
+                catalyst_llm::ContentBlock::ToolUse {
+                    id: "tool_1".to_string(),
+                    name: "read".to_string(),
+                    input: serde_json::json!({"path": "/test.rs"}),
+                },
+                catalyst_llm::ContentBlock::ToolResult {
+                    tool_use_id: "tool_1".to_string(),
+                    content: "file contents here".to_string(),
+                    is_error: false,
+                },
+            ]),
+        }];
+        let count = TokenCounter::count_messages(&messages);
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_token_counter_multiple_messages() {
+        let messages = vec![
+            catalyst_llm::Message {
+                role: catalyst_llm::Role::User,
+                content: catalyst_llm::Content::Text("Hello".to_string()),
+            },
+            catalyst_llm::Message {
+                role: catalyst_llm::Role::Assistant,
+                content: catalyst_llm::Content::Text("Hi there!".to_string()),
+            },
+            catalyst_llm::Message {
+                role: catalyst_llm::Role::User,
+                content: catalyst_llm::Content::Text("How are you?".to_string()),
+            },
+        ];
+        let count = TokenCounter::count_messages(&messages);
+        assert!(count > 5);
+    }
+
+    #[test]
+    fn test_token_budget_total_used() {
+        let mut budget = TokenBudget::for_model("claude-sonnet-4-20250514");
+        budget.system_prompt = 100;
+        budget.tool_definitions = 200;
+        budget.working_memory = 300;
+        budget.tool_results = 400;
+        budget.archive = 500;
+        assert_eq!(budget.total_used(), 1500);
+    }
+
+    #[test]
+    fn test_token_budget_available_after_use() {
+        let mut budget = TokenBudget::for_model("claude-sonnet-4-20250514");
+        budget.system_prompt = 10000;
+        budget.tool_definitions = 5000;
+        let available = budget.available();
+        assert_eq!(available, 200_000 - 20_000 - 10_000 - 5_000);
+    }
+
+    #[test]
+    fn test_file_cache_update_existing() {
+        let mut cache = FileCache::new(10);
+        let path = Path::new("test.rs");
+
+        cache.insert(path, "v1".to_string(), SystemTime::UNIX_EPOCH);
+        assert_eq!(cache.get(path).unwrap().content, "v1");
+
+        cache.insert(path, "v2".to_string(), SystemTime::UNIX_EPOCH);
+        assert_eq!(cache.get(path).unwrap().content, "v2");
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn test_file_cache_lru_ordering() {
+        let mut cache = FileCache::new(3);
+
+        cache.insert(Path::new("a.rs"), "a".to_string(), SystemTime::UNIX_EPOCH);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        cache.insert(Path::new("b.rs"), "b".to_string(), SystemTime::UNIX_EPOCH);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        cache.insert(Path::new("c.rs"), "c".to_string(), SystemTime::UNIX_EPOCH);
+
+        assert!(cache.get(Path::new("a.rs")).is_some());
+
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        cache.insert(Path::new("d.rs"), "d".to_string(), SystemTime::UNIX_EPOCH);
+
+        assert_eq!(cache.len(), 3);
+        assert!(cache.get(Path::new("a.rs")).is_some());
+        assert!(cache.get(Path::new("d.rs")).is_some());
+    }
+
+    #[test]
+    fn test_file_cache_token_count_tracking() {
+        let mut cache = FileCache::new(10);
+        let content = "fn main() { println!(\"hello\"); }";
+        cache.insert(
+            Path::new("test.rs"),
+            content.to_string(),
+            SystemTime::UNIX_EPOCH,
+        );
+
+        let entry = cache.get(Path::new("test.rs")).unwrap();
+        assert!(entry.token_count > 0);
+        assert_eq!(entry.token_count, TokenCounter::count(content));
+    }
+
+    #[test]
+    fn test_context_engine_build_messages_preserves_order() {
+        let engine = ContextEngine::new("claude-sonnet-4-20250514");
+        let messages: Vec<catalyst_llm::Message> = (0..5)
+            .map(|i| catalyst_llm::Message {
+                role: catalyst_llm::Role::User,
+                content: catalyst_llm::Content::Text(format!("Message {}", i)),
+            })
+            .collect();
+
+        let result = engine.build_messages(&messages, "system");
+        assert_eq!(result.len(), 5);
+
+        match &result[0].content {
+            catalyst_llm::Content::Text(t) => assert!(t.contains("Message 0")),
+            _ => panic!("Expected text"),
+        }
+        match &result[4].content {
+            catalyst_llm::Content::Text(t) => assert!(t.contains("Message 4")),
+            _ => panic!("Expected text"),
+        }
+    }
+
+    #[test]
+    fn test_context_engine_build_messages_single_message() {
+        let engine = ContextEngine::new("claude-sonnet-4-20250514");
+        let messages = vec![catalyst_llm::Message {
+            role: catalyst_llm::Role::User,
+            content: catalyst_llm::Content::Text("Hello".to_string()),
+        }];
+
+        let result = engine.build_messages(&messages, "system");
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_context_engine_build_messages_keeps_recent() {
+        let mut engine = ContextEngine::new("claude-sonnet-4-20250514");
+        engine.max_context = 30;
+
+        let messages: Vec<catalyst_llm::Message> = (0..10)
+            .map(|i| catalyst_llm::Message {
+                role: catalyst_llm::Role::User,
+                content: catalyst_llm::Content::Text(format!("Msg {}", i)),
+            })
+            .collect();
+
+        let result = engine.build_messages(&messages, "s");
+        assert!(result.len() < 10);
+
+        if let Some(last) = result.last() {
+            match &last.content {
+                catalyst_llm::Content::Text(t) => assert!(t.contains("9")),
+                _ => panic!("Expected text"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_context_engine_truncate_output_head_tail() {
+        let engine = ContextEngine::new("claude-sonnet-4-20250514");
+        let output = "abcdefghij".repeat(100);
+        let truncated = engine.truncate_output(&output, 300);
+
+        assert!(truncated.starts_with("abcdefghij"));
+        assert!(truncated.ends_with("abcdefghij"));
+        assert!(truncated.contains("truncated"));
+        assert!(truncated.len() < output.len());
+    }
+
+    #[test]
+    fn test_context_engine_truncate_output_exact_fit() {
+        let engine = ContextEngine::new("claude-sonnet-4-20250514");
+        let output = "x".repeat(50);
+        let result = engine.truncate_output(&output, 100);
+        assert_eq!(result, output);
+    }
+
+    #[test]
+    fn test_context_engine_would_overflow_large() {
+        let mut engine = ContextEngine::new("claude-sonnet-4-20250514");
+        engine.max_context = 1000;
+
+        let large_messages: Vec<catalyst_llm::Message> = (0..50)
+            .map(|_| catalyst_llm::Message {
+                role: catalyst_llm::Role::User,
+                content: catalyst_llm::Content::Text("x ".repeat(500)),
+            })
+            .collect();
+        assert!(engine.would_overflow(&large_messages, 0));
+    }
+
+    #[test]
+    fn test_context_engine_would_overflow_empty() {
+        let engine = ContextEngine::new("claude-sonnet-4-20250514");
+        assert!(!engine.would_overflow(&[], 100));
+    }
+
+    #[test]
+    fn test_multiple_summaries() {
+        let mut engine = ContextEngine::new("claude-sonnet-4-20250514");
+        engine.add_summary("Topic 1".to_string(), vec!["Action 1".to_string()], vec![]);
+        engine.add_summary("Topic 2".to_string(), vec!["Action 2".to_string()], vec![]);
+        engine.add_summary("Topic 3".to_string(), vec![], vec!["Outcome 3".to_string()]);
+
+        assert_eq!(engine.archive_summaries().len(), 3);
+        assert!(engine.archive_token_count() > 0);
+        assert_eq!(engine.archive_summaries()[0].topic, "Topic 1");
+        assert_eq!(engine.archive_summaries()[2].outcomes.len(), 1);
+    }
+
+    #[test]
+    fn test_summary_empty_actions() {
+        let summary = Summary {
+            topic: "Test".to_string(),
+            actions: vec![],
+            outcomes: vec![],
+            token_count: 0,
+        };
+        let text = summary.to_text();
+        assert!(text.contains("Test"));
+        assert!(!text.contains("Actions"));
+        assert!(!text.contains("Outcomes"));
+    }
+
+    #[test]
+    fn test_context_engine_file_cache_access() {
+        let mut engine = ContextEngine::new("claude-sonnet-4-20250514");
+        engine.file_cache().insert(
+            Path::new("test.rs"),
+            "content".to_string(),
+            SystemTime::UNIX_EPOCH,
+        );
+
+        assert_eq!(engine.file_cache().len(), 1);
+        assert!(engine.file_cache().get(Path::new("test.rs")).is_some());
+        assert!(engine.file_cache().get(Path::new("missing.rs")).is_none());
+    }
+
+    #[test]
+    fn test_context_engine_max_context() {
+        let claude = ContextEngine::new("claude-sonnet-4-20250514");
+        assert_eq!(claude.max_context(), 200_000);
+
+        let gpt = ContextEngine::new("gpt-4o");
+        assert_eq!(gpt.max_context(), 128_000);
+    }
+
+    #[test]
+    fn test_build_messages_with_large_system_prompt() {
+        let mut engine = ContextEngine::new("claude-sonnet-4-20250514");
+        engine.max_context = 100;
+
+        let messages = vec![catalyst_llm::Message {
+            role: catalyst_llm::Role::User,
+            content: catalyst_llm::Content::Text("Hello".to_string()),
+        }];
+        let large_prompt = "x".repeat(50);
+
+        let result = engine.build_messages(&messages, &large_prompt);
+        assert!(result.len() <= 1);
+    }
+
+    #[test]
+    fn test_token_counter_empty_messages() {
+        let count = TokenCounter::count_messages(&[]);
+        assert_eq!(count, 0);
     }
 }
